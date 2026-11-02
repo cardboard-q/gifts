@@ -1,7 +1,11 @@
 rules_version = '2';
 
-// Paste into Firebase console → Firestore Database → Rules, replace the
-// organizer email below with your own, then click Publish.
+// Paste into Firebase console → Firestore Database → Rules, then click Publish.
+//
+// Each exchange has a secret organizer key stored in groups/{gid}/secret/admin,
+// which only existing organizers can read. Opening the organizer link writes the key into
+// groups/{gid}/organizers/{uid}; the rules only allow that write when the key
+// matches, and from then on that browser is an organizer.
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -9,25 +13,46 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function isOrganizer() {
-      return signedIn()
-        && request.auth.token.email == "you@example.com"
-        && request.auth.token.email_verified == true;
+    function groupPath(gid) {
+      return /databases/$(database)/documents/groups/$(gid);
     }
 
-    function ownsGroup(gid) {
-      return signedIn()
-        && get(/databases/$(database)/documents/groups/$(gid)).data.ownerUid == request.auth.uid;
+    function secretPath(gid) {
+      return /databases/$(database)/documents/groups/$(gid)/secret/admin;
+    }
+
+    function organizerPath(gid) {
+      return /databases/$(database)/documents/groups/$(gid)/organizers/$(request.auth.uid);
+    }
+
+    function isOrganizer(gid) {
+      return signedIn() && exists(organizerPath(gid));
     }
 
     function validName(s, max) {
       return s is string && s.size() > 0 && s.size() <= max;
     }
 
+    function validAssignments(a) {
+      return a == null || (a is map && a.size() <= 200);
+    }
+
+    function personSecretPath(gid, pid) {
+      return /databases/$(database)/documents/groups/$(gid)/people/$(pid)/secret/edit;
+    }
+
+    function editorPath(gid, pid) {
+      return /databases/$(database)/documents/groups/$(gid)/people/$(pid)/editors/$(request.auth.uid);
+    }
+
+    function canEditPerson(gid, pid) {
+      return signedIn() && (exists(editorPath(gid, pid)) || isOrganizer(gid));
+    }
+
     // Rules can't loop over list items, so item contents are only bounded by
     // the item count and Firestore's 1 MiB document limit.
     function validPerson(d) {
-      return d.keys().hasOnly(['name', 'household', 'items', 'ownerUid', 'createdAt', 'updatedAt'])
+      return d.keys().hasOnly(['name', 'household', 'items', 'createdAt', 'updatedAt'])
         && validName(d.name, 50)
         && d.household is string && d.household.size() <= 40
         && d.items is list && d.items.size() <= 20
@@ -35,50 +60,98 @@ service cloud.firestore {
     }
 
     match /groups/{gid} {
-      // Anyone holding the link can read; nobody can enumerate groups except
-      // the organizer listing their own.
+      // Anyone holding the link can read; nobody can enumerate groups.
       allow get: if true;
-      allow list: if signedIn() && resource.data.ownerUid == request.auth.uid;
+      allow list: if false;
 
-      allow create: if isOrganizer()
+      // Created in one batch together with its secret and the creator's organizer doc.
+      allow create: if signedIn()
         && gid.size() >= 16
-        && request.resource.data.keys().hasOnly(['name', 'ownerUid', 'avoidSameHousehold', 'assignments', 'drawnAt', 'createdAt'])
-        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.keys().hasOnly(['name', 'avoidSameHousehold', 'assignments', 'drawnAt', 'createdAt'])
         && validName(request.resource.data.name, 60)
         && request.resource.data.avoidSameHousehold is bool
         && request.resource.data.assignments == null
         && request.resource.data.drawnAt == null
-        && request.resource.data.createdAt == request.time;
+        && request.resource.data.createdAt == request.time
+        && existsAfter(secretPath(gid))
+        && existsAfter(organizerPath(gid));
 
-      allow update: if signedIn()
-        && resource.data.ownerUid == request.auth.uid
+      allow update: if isOrganizer(gid)
         && request.resource.data.diff(resource.data).affectedKeys()
              .hasOnly(['name', 'avoidSameHousehold', 'assignments', 'drawnAt'])
         && validName(request.resource.data.name, 60)
         && request.resource.data.avoidSameHousehold is bool
-        && (request.resource.data.assignments == null
-            || (request.resource.data.assignments is map
-                && request.resource.data.assignments.size() <= 200));
+        && validAssignments(request.resource.data.assignments);
 
-      allow delete: if signedIn() && resource.data.ownerUid == request.auth.uid;
+      allow delete: if false;
 
+      match /secret/{docId} {
+        // Only organizers can read it, so they can copy the organizer link later.
+        allow get: if isOrganizer(gid);
+        allow list: if false;
+        allow create: if signedIn()
+          && docId == 'admin'
+          && !exists(groupPath(gid))
+          && existsAfter(groupPath(gid))
+          && request.resource.data.keys().hasOnly(['key'])
+          && request.resource.data.key is string
+          && request.resource.data.key.size() >= 24;
+        allow update, delete: if false;
+      }
+
+      match /organizers/{uid} {
+        allow get: if signedIn() && request.auth.uid == uid;
+        allow list: if false;
+        allow create: if signedIn()
+          && request.auth.uid == uid
+          && request.resource.data.keys().hasOnly(['key'])
+          && request.resource.data.key == getAfter(secretPath(gid)).data.key;
+        allow update, delete: if false;
+      }
+
+      // Same pattern as organizers: each person has a secret edit key, and
+      // opening their edit link registers that browser in people/{pid}/editors.
       match /people/{pid} {
         allow read: if true;
 
+        // Created in one batch together with its secret and the creator's editor doc.
         allow create: if signedIn()
-          && exists(/databases/$(database)/documents/groups/$(gid))
+          && exists(groupPath(gid))
           && validPerson(request.resource.data)
-          && request.resource.data.ownerUid == request.auth.uid
-          && request.resource.data.createdAt == request.time;
+          && request.resource.data.createdAt == request.time
+          && existsAfter(personSecretPath(gid, pid))
+          && existsAfter(editorPath(gid, pid));
 
-        allow update: if signedIn()
-          && (resource.data.ownerUid == request.auth.uid || ownsGroup(gid))
+        allow update: if canEditPerson(gid, pid)
           && validPerson(request.resource.data)
-          && request.resource.data.ownerUid == resource.data.ownerUid
           && request.resource.data.createdAt == resource.data.createdAt;
 
-        allow delete: if signedIn()
-          && (resource.data.ownerUid == request.auth.uid || ownsGroup(gid));
+        // Leaves the secret and editor docs behind; they're tiny and unreadable.
+        allow delete: if canEditPerson(gid, pid);
+
+        match /secret/{docId} {
+          // The organizer can read it to re-send someone their edit link.
+          allow get: if isOrganizer(gid);
+          allow list: if false;
+          allow create: if signedIn()
+            && docId == 'edit'
+            && !exists(/databases/$(database)/documents/groups/$(gid)/people/$(pid))
+            && existsAfter(/databases/$(database)/documents/groups/$(gid)/people/$(pid))
+            && request.resource.data.keys().hasOnly(['key'])
+            && request.resource.data.key is string
+            && request.resource.data.key.size() >= 24;
+          allow update, delete: if false;
+        }
+
+        match /editors/{uid} {
+          allow get: if signedIn() && request.auth.uid == uid;
+          allow list: if false;
+          allow create: if signedIn()
+            && request.auth.uid == uid
+            && request.resource.data.keys().hasOnly(['key'])
+            && request.resource.data.key == getAfter(personSecretPath(gid, pid)).data.key;
+          allow update, delete: if false;
+        }
       }
     }
   }

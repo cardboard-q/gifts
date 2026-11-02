@@ -1,31 +1,36 @@
 # Gift Exchange — Firebase setup
 
-One-time setup, about 15 minutes. Everything stays on Firebase's free **Spark** plan;
+One-time setup, about 10 minutes. Everything stays on Firebase's free **Spark** plan;
 don't add a billing account and there's nothing that can ever charge you.
+
+Nobody needs an account or password. Access works through links:
+
+- **Family link** (`?g=…`): see all wishlists and add yourself.
+- **Edit link** (`?g=…&edit=…`): everyone gets one when they add themselves. Opening it
+  on any device lets that device edit their wishlist.
+- **Organizer link** (`?g=…&admin=…`): you get it when you create the exchange. Opening it
+  on any device lets that device draw names, edit anyone's wishlist, and re-send edit links.
 
 ## 1. Create the project
 
 1. Go to <https://console.firebase.google.com> and click **Create a project**.
 2. Name it (e.g. `family-gifts`). Turn **Google Analytics off**. Click **Create project**.
 
-## 2. Turn on sign-in
+## 2. Turn on anonymous sign-in
+
+This is invisible to people: it just gives each browser an ID so the rules can tell
+devices apart.
 
 1. Left sidebar → **Build → Authentication** → **Get started**.
-2. **Sign-in method** tab:
-   - Click **Anonymous** → toggle **Enable** → **Save**.
-   - Click **Add new provider** → **Google** → toggle **Enable**, pick your email as the support email → **Save**.
-3. **Settings** tab → **Authorized domains** → **Add domain** → `cardboard-q.github.io`.
-   (`localhost` is already there for local testing.)
+2. **Sign-in method** tab → **Anonymous** → toggle **Enable** → **Save**.
 
 ## 3. Create the database
 
 1. Left sidebar → **Build → Firestore Database** → **Create database**.
 2. Pick a location close to you (e.g. `nam5 (United States)`), then choose
    **Start in production mode** → **Create**.
-3. Open the **Rules** tab. Delete what's there and paste the contents of
-   [`firestore.rules`](firestore.rules).
-4. Replace `you@example.com` with the Google account you'll use as organizer.
-5. Click **Publish**.
+3. Open the **Rules** tab. Delete what's there, paste the contents of
+   [`firestore.rules`](firestore.rules), and click **Publish**.
 
 ## 4. Connect the page
 
@@ -42,7 +47,6 @@ don't add a billing account and there's nothing that can ever charge you.
 2. Click the key named **Browser key (auto created by Firebase)**.
 3. Under **Application restrictions** choose **Websites** and add:
    - `https://cardboard-q.github.io/*`
-   - `https://YOUR_PROJECT.firebaseapp.com/*` (needed for the Google sign-in popup)
    - `http://localhost:8000/*` (for local testing)
 4. **Save**. It can take a few minutes to apply.
 
@@ -59,6 +63,6 @@ the page loads `firebase-config.js` as a module).
 ## 7. Publish and use it
 
 1. Commit and push. The page will be at <https://cardboard-q.github.io/spinspinner/gifts/>.
-2. Click **Organizer sign-in** at the bottom, sign in with the email from step 3.
-3. Create an exchange, copy its link, and send it to the family.
+2. Create an exchange. Click **🔑 Copy my organizer link** and save it somewhere safe.
+3. Click **📋 Copy link** and send the family link to everyone.
 4. Once everyone has joined, click **Draw names**.

@@ -90,10 +90,6 @@
   .btn.red { background: var(--red); }
   .btn.secondary { background: var(--soft); color: var(--ink); font-weight: normal; }
   .btn.small { padding: 6px 10px; font-size: 0.85rem; }
-  .linkish {
-    font: inherit; background: none; border: none; padding: 0;
-    color: var(--muted); text-decoration: underline; cursor: pointer;
-  }
 
   .share {
     display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
@@ -161,7 +157,6 @@
   .center { text-align: center; }
   .groups { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
   .groups a { color: var(--blue); }
-  footer { text-align: center; padding: 0 16px 32px; color: var(--muted); font-size: 0.9rem; }
 
   #toast {
     position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(20px);
@@ -179,38 +174,59 @@
     <p id="subtitle"></p>
   </header>
   <main id="app"><p class="empty">Loading…</p></main>
-  <footer id="footer"></footer>
   <div id="toast" role="status"></div>
 
 <script type="module">
 import { firebaseConfig } from "./firebase-config.js";
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, onAuthStateChanged, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
-  getAuth, onAuthStateChanged, signInAnonymously, signInWithPopup, GoogleAuthProvider, signOut,
-} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import {
-  getFirestore, doc, collection, onSnapshot, setDoc, addDoc, updateDoc, deleteDoc,
-  serverTimestamp, query, where, getDocs,
+  getFirestore, doc, collection, onSnapshot, getDoc, setDoc, updateDoc, deleteDoc,
+  serverTimestamp, writeBatch,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const CARD_COLORS = ["#d94848", "#2f9e62", "#3aa0ff", "#e8a21a", "#8b6cff", "#e0679a", "#17a2a2", "#f07a3a"];
 const MAX_ITEMS = 20;
+const GROUPS_KEY = "gifts.groups";
+const EDIT_KEYS = "gifts.editKeys";
 
 const app = document.getElementById("app");
 const subtitle = document.getElementById("subtitle");
-const footer = document.getElementById("footer");
 const toastEl = document.getElementById("toast");
 
-const gid = new URLSearchParams(location.search).get("g");
+const params = new URLSearchParams(location.search);
+const gid = params.get("g");
+const adminParam = params.get("admin");
+const editParam = params.get("edit");
+// Keep secret keys out of the address bar so they don't get copied or screen-shared by accident.
+if (gid && (adminParam || editParam)) history.replaceState(null, "", `${location.pathname}?g=${encodeURIComponent(gid)}`);
 
 const state = {
   user: null,
   group: undefined,
   people: [],
   editingId: null,
-  myGroups: null,
   loadError: null,
+  isOrganizer: false,
+  editable: new Set(),
+  checked: new Set(),
+  justAdded: null,
 };
+
+function loadStore(key) {
+  try { return JSON.parse(localStorage.getItem(key)) || {}; } catch { return {}; }
+}
+function saveStore(key, val) {
+  try { localStorage.setItem(key, JSON.stringify(val)); } catch {}
+}
+function rememberGroup(id, patch) {
+  const all = loadStore(GROUPS_KEY);
+  all[id] = { ...all[id], ...patch };
+  saveStore(GROUPS_KEY, all);
+}
+function rememberEditKey(pid, key) {
+  saveStore(EDIT_KEYS, { ...loadStore(EDIT_KEYS), [pid]: key });
+}
 
 // ---------- tiny DOM helper ----------
 function h(tag, props = {}, ...children) {
@@ -242,7 +258,6 @@ function toast(msg, isError = false) {
 function friendlyError(err) {
   console.error(err);
   if (err?.code === "permission-denied") return "Sorry, you're not allowed to do that.";
-  if (err?.code === "auth/popup-closed-by-user") return "Sign-in was cancelled.";
   return "Something went wrong. Please try again.";
 }
 
@@ -265,6 +280,17 @@ function safeUrl(raw) {
 
 const norm = s => (s || "").trim().toLowerCase();
 const shareLink = () => `${location.origin}${location.pathname}?g=${encodeURIComponent(gid)}`;
+const organizerLink = key => `${shareLink()}&admin=${encodeURIComponent(key)}`;
+const editLink = (pid, key) => `${shareLink()}&edit=${encodeURIComponent(pid + "." + key)}`;
+
+async function copyText(text, msg) {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast(msg);
+  } catch {
+    prompt("Copy this link:", text);
+  }
+}
 
 // ---------- setup check ----------
 if (firebaseConfig.apiKey.startsWith("YOUR_")) {
@@ -279,19 +305,27 @@ const fbApp = initializeApp(firebaseConfig);
 const auth = getAuth(fbApp);
 const db = getFirestore(fbApp);
 
-onAuthStateChanged(auth, user => {
+onAuthStateChanged(auth, async user => {
   if (!user) {
     signInAnonymously(auth).catch(err => toast(friendlyError(err), true));
     return;
   }
   state.user = user;
-  if (!gid && !user.isAnonymous) loadMyGroups();
+  if (gid) {
+    await claimOrganizer();
+    await claimEdit();
+    refreshEditable();
+  }
   render();
 });
 
 if (gid) {
   onSnapshot(doc(db, "groups", gid),
-    snap => { state.group = snap.exists() ? snap.data() : null; render(); },
+    snap => {
+      state.group = snap.exists() ? snap.data() : null;
+      if (state.group && state.isOrganizer) rememberGroup(gid, { name: state.group.name });
+      render();
+    },
     err => { state.loadError = friendlyError(err); render(); });
   onSnapshot(collection(db, "groups", gid, "people"),
     snap => {
@@ -299,23 +333,61 @@ if (gid) {
         .map(d => ({ id: d.id, ...d.data() }))
         .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
       render();
+      refreshEditable();
     },
     err => { state.loadError = friendlyError(err); render(); });
 }
 
-async function loadMyGroups() {
+async function claimOrganizer() {
+  const ref = doc(db, "groups", gid, "organizers", state.user.uid);
   try {
-    const snap = await getDocs(query(collection(db, "groups"), where("ownerUid", "==", state.user.uid)));
-    state.myGroups = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    if ((await getDoc(ref)).exists()) {
+      state.isOrganizer = true;
+      return;
+    }
+    if (!adminParam) return;
+    await setDoc(ref, { key: adminParam });
+    state.isOrganizer = true;
+    rememberGroup(gid, { adminKey: adminParam });
+    toast("You're an organizer on this device. 🎉");
   } catch (err) {
-    state.myGroups = [];
+    if (adminParam) toast("That organizer link didn't work.", true);
   }
-  render();
+}
+
+async function claimEdit() {
+  if (!editParam) return;
+  const [pid, key] = editParam.split(".");
+  if (!pid || !key) return;
+  const ref = doc(db, "groups", gid, "people", pid, "editors", state.user.uid);
+  try {
+    if (!(await getDoc(ref)).exists()) await setDoc(ref, { key });
+    state.editable.add(pid);
+    state.checked.add(pid);
+    rememberEditKey(pid, key);
+    toast("You can edit this wishlist on this device now. ✏️");
+  } catch (err) {
+    toast("That edit link didn't work.", true);
+  }
+}
+
+async function refreshEditable() {
+  if (!state.user || !gid) return;
+  const todo = state.people.filter(p => !state.checked.has(p.id));
+  if (!todo.length) return;
+  todo.forEach(p => state.checked.add(p.id));
+  const results = await Promise.all(todo.map(p =>
+    getDoc(doc(db, "groups", gid, "people", p.id, "editors", state.user.uid))
+      .then(snap => snap.exists(), () => false)));
+  let changed = false;
+  todo.forEach((p, i) => {
+    if (results[i]) { state.editable.add(p.id); changed = true; }
+  });
+  if (changed) render();
 }
 
 // ---------- permissions (mirrors firestore.rules) ----------
-const isGroupOwner = () => !!(state.user && state.group && state.group.ownerUid === state.user.uid);
-const canEdit = p => !!state.user && (p.ownerUid === state.user.uid || isGroupOwner());
+const canEdit = p => state.isOrganizer || state.editable.has(p.id);
 
 // ---------- drawing names ----------
 function shuffle(a) {
@@ -375,41 +447,78 @@ function drawIsStale() {
 }
 
 // ---------- actions ----------
-async function organizerSignIn() {
+async function createGroup(name) {
+  const id = randomId();
+  const key = randomId(32);
+  const batch = writeBatch(db);
+  batch.set(doc(db, "groups", id), {
+    name,
+    avoidSameHousehold: true,
+    assignments: null,
+    drawnAt: null,
+    createdAt: serverTimestamp(),
+  });
+  batch.set(doc(db, "groups", id, "secret", "admin"), { key });
+  batch.set(doc(db, "groups", id, "organizers", state.user.uid), { key });
   try {
-    await signInWithPopup(auth, new GoogleAuthProvider());
+    await batch.commit();
+    rememberGroup(id, { name, adminKey: key });
+    location.href = `${location.pathname}?g=${id}`;
   } catch (err) {
     toast(friendlyError(err), true);
   }
 }
 
-async function createGroup(name) {
-  const id = randomId();
+async function savePerson(id, data) {
+  const payload = { ...data, updatedAt: serverTimestamp() };
+  if (id) return updateDoc(doc(db, "groups", gid, "people", id), payload);
+
+  const ref = doc(collection(db, "groups", gid, "people"));
+  const key = randomId(32);
+  const batch = writeBatch(db);
+  batch.set(ref, { ...payload, createdAt: serverTimestamp() });
+  batch.set(doc(ref, "secret", "edit"), { key });
+  batch.set(doc(ref, "editors", state.user.uid), { key });
+  state.editable.add(ref.id);
+  state.checked.add(ref.id);
   try {
-    await setDoc(doc(db, "groups", id), {
-      name,
-      ownerUid: state.user.uid,
-      avoidSameHousehold: true,
-      assignments: null,
-      drawnAt: null,
-      createdAt: serverTimestamp(),
-    });
-    location.search = "?g=" + id;
+    await batch.commit();
   } catch (err) {
-    toast(err?.code === "permission-denied"
-      ? "Only the organizer's Google account can create exchanges."
-      : friendlyError(err), true);
+    state.editable.delete(ref.id);
+    throw err;
+  }
+  rememberEditKey(ref.id, key);
+  state.justAdded = { pid: ref.id, name: data.name, key };
+}
+
+async function personEditKey(p) {
+  const local = loadStore(EDIT_KEYS)[p.id];
+  if (local) return local;
+  if (!state.isOrganizer) return null;
+  try {
+    const snap = await getDoc(doc(db, "groups", gid, "people", p.id, "secret", "edit"));
+    return snap.data()?.key || null;
+  } catch {
+    return null;
   }
 }
 
-async function savePerson(id, data) {
-  const payload = { ...data, updatedAt: serverTimestamp() };
-  if (id) {
-    await updateDoc(doc(db, "groups", gid, "people", id), payload);
-  } else {
-    await addDoc(collection(db, "groups", gid, "people"), {
-      ...payload, ownerUid: state.user.uid, createdAt: serverTimestamp(),
-    });
+async function copyEditLink(p) {
+  const key = await personEditKey(p);
+  if (!key) return toast("Couldn't find this person's edit link.", true);
+  copyText(editLink(p.id, key), `Copied ${p.name}'s edit link. Send it only to them.`);
+}
+
+async function organizerKey() {
+  const local = loadStore(GROUPS_KEY)[gid]?.adminKey;
+  if (local) return local;
+  try {
+    const snap = await getDoc(doc(db, "groups", gid, "secret", "admin"));
+    const key = snap.data()?.key;
+    if (key) rememberGroup(gid, { adminKey: key });
+    return key || null;
+  } catch {
+    return null;
   }
 }
 
@@ -463,8 +572,6 @@ function render() {
   const active = document.activeElement;
   const typing = form && form.contains(active);
 
-  renderFooter();
-
   if (!gid) return renderLanding();
   if (state.loadError) return app.replaceChildren(h("div", { class: "banner error" }, state.loadError));
   if (state.group === undefined) return;
@@ -480,7 +587,8 @@ function render() {
   document.title = `${state.group.name} · Gift Exchange`;
 
   const sections = [shareView()];
-  if (isGroupOwner()) sections.push(organizerView());
+  if (state.justAdded) sections.push(justAddedView());
+  if (state.isOrganizer) sections.push(organizerView());
   if (state.group.assignments && !drawIsStale()) sections.push(pairsView());
 
   if (typing) {
@@ -493,42 +601,30 @@ function render() {
   app.replaceChildren(...sections, personFormView(), peopleView());
 }
 
-function renderFooter() {
-  const u = state.user;
-  if (u && !u.isAnonymous) {
-    footer.replaceChildren(`Signed in as ${u.email} · `,
-      h("button", { class: "linkish", onclick: () => signOut(auth) }, "Sign out"));
-  } else {
-    footer.replaceChildren(h("button", { class: "linkish", onclick: organizerSignIn }, "Organizer sign-in"));
-  }
-}
-
 function renderLanding() {
   subtitle.textContent = "";
-  const u = state.user;
-  if (!u || u.isAnonymous) {
-    app.replaceChildren(h("div", { class: "panel center" },
-      h("h2", {}, "Looking for your family's exchange?"),
-      h("p", { class: "hint" }, "Open the link the organizer sent you. It ends in ?g=…"),
-    ));
-    return;
-  }
   const nameInput = h("input", { type: "text", maxLength: 60, placeholder: "e.g. Family Christmas 2026", required: true });
+  const createBtn = h("button", { class: "btn", type: "submit", disabled: !state.user }, "Create");
   const createForm = h("form", {
     class: "row",
-    onsubmit: e => { e.preventDefault(); const n = nameInput.value.trim(); if (n) createGroup(n); },
-  }, nameInput, h("button", { class: "btn", type: "submit" }, "Create"));
+    onsubmit: e => {
+      e.preventDefault();
+      const n = nameInput.value.trim();
+      if (n && state.user) { createBtn.disabled = true; createGroup(n); }
+    },
+  }, nameInput, createBtn);
 
-  const list = state.myGroups === null
-    ? h("p", { class: "hint" }, "Loading your exchanges…")
-    : state.myGroups.length === 0
-      ? h("p", { class: "hint" }, "You haven't made any exchanges yet.")
-      : h("ul", { class: "groups" }, state.myGroups.map(g =>
-          h("li", {}, h("a", { href: `?g=${encodeURIComponent(g.id)}` }, g.name))));
-
+  const mine = Object.entries(loadStore(GROUPS_KEY));
   app.replaceChildren(
-    h("div", { class: "panel" }, h("h2", {}, "Start a new gift exchange"), createForm),
-    h("div", { class: "panel" }, h("h2", {}, "Your exchanges"), list),
+    h("div", { class: "panel" },
+      h("h2", {}, "Start a new gift exchange"),
+      h("p", { class: "hint" }, "You'll get a link to send the family, plus a private organizer link for you."),
+      createForm),
+    mine.length && h("div", { class: "panel" },
+      h("h2", {}, "Exchanges on this device"),
+      h("ul", { class: "groups" }, mine.map(([id, g]) =>
+        h("li", {}, h("a", { href: `?g=${encodeURIComponent(id)}` }, g.name || "Untitled exchange"))))),
+    h("p", { class: "hint center" }, "Got a link from the organizer? Just open it."),
   );
 }
 
@@ -546,6 +642,22 @@ function shareView() {
           catch { toast("Couldn't copy. Select the link and copy it instead.", true); }
         },
       }, "📋 Copy link"),
+    ),
+  );
+}
+
+function justAddedView() {
+  const { pid, name, key } = state.justAdded;
+  const link = editLink(pid, key);
+  return h("div", { class: "panel", style: "border: 3px solid var(--green)" },
+    h("h2", {}, `🎉 ${name} is in! Save this edit link`),
+    h("p", { class: "hint" }, "This device can already edit the wishlist. To edit from another phone or computer later, open this link there. Text or email it to yourself, or bookmark it. Don't share it with anyone else."),
+    h("div", { class: "share" },
+      h("code", {}, link),
+      h("button", { class: "btn secondary", onclick: () => copyText(link, "Edit link copied!") }, "📋 Copy"),
+    ),
+    h("div", { class: "row" },
+      h("button", { class: "btn secondary small", onclick: () => { state.justAdded = null; render(); } }, "Got it"),
     ),
   );
 }
@@ -571,6 +683,17 @@ function organizerView() {
       drawn && h("button", { class: "btn secondary", onclick: clearDraw }, "Clear draw"),
     ),
     h("p", { class: "hint" }, `${state.people.length} ${state.people.length === 1 ? "person has" : "people have"} joined.`),
+    h("div", { class: "row" },
+      h("button", {
+        class: "btn secondary small",
+        onclick: async () => {
+          const key = await organizerKey();
+          if (!key) return toast("Couldn't load the organizer link.", true);
+          copyText(organizerLink(key), "Organizer link copied. Keep it private!");
+        },
+      }, "🔑 Copy my organizer link"),
+    ),
+    h("p", { class: "hint" }, "Open your organizer link on another device to manage this exchange there. Anyone with it can draw names and edit any wishlist, so keep it to yourself. Use the 🔗 button on someone's card to re-send them their edit link."),
   );
 }
 
@@ -686,6 +809,8 @@ function peopleView() {
           onclick: () => { state.editingId = p.id; render(); document.getElementById("personFormPanel").scrollIntoView({ behavior: "smooth" }); },
         }, "✏️ Edit"),
         h("button", { class: "btn secondary small", onclick: () => removePerson(p) }, "🗑 Remove"),
+        (state.isOrganizer || loadStore(EDIT_KEYS)[p.id]) &&
+          h("button", { class: "btn secondary small", title: "Copy edit link", onclick: () => copyEditLink(p) }, "🔗"),
       ),
     );
   }));
