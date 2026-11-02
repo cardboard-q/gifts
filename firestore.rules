@@ -1,0 +1,85 @@
+rules_version = '2';
+
+// Paste into Firebase console → Firestore Database → Rules, replace the
+// organizer email below with your own, then click Publish.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOrganizer() {
+      return signedIn()
+        && request.auth.token.email == "you@example.com"
+        && request.auth.token.email_verified == true;
+    }
+
+    function ownsGroup(gid) {
+      return signedIn()
+        && get(/databases/$(database)/documents/groups/$(gid)).data.ownerUid == request.auth.uid;
+    }
+
+    function validName(s, max) {
+      return s is string && s.size() > 0 && s.size() <= max;
+    }
+
+    // Rules can't loop over list items, so item contents are only bounded by
+    // the item count and Firestore's 1 MiB document limit.
+    function validPerson(d) {
+      return d.keys().hasOnly(['name', 'household', 'items', 'ownerUid', 'createdAt', 'updatedAt'])
+        && validName(d.name, 50)
+        && d.household is string && d.household.size() <= 40
+        && d.items is list && d.items.size() <= 20
+        && d.updatedAt == request.time;
+    }
+
+    match /groups/{gid} {
+      // Anyone holding the link can read; nobody can enumerate groups except
+      // the organizer listing their own.
+      allow get: if true;
+      allow list: if signedIn() && resource.data.ownerUid == request.auth.uid;
+
+      allow create: if isOrganizer()
+        && gid.size() >= 16
+        && request.resource.data.keys().hasOnly(['name', 'ownerUid', 'avoidSameHousehold', 'assignments', 'drawnAt', 'createdAt'])
+        && request.resource.data.ownerUid == request.auth.uid
+        && validName(request.resource.data.name, 60)
+        && request.resource.data.avoidSameHousehold is bool
+        && request.resource.data.assignments == null
+        && request.resource.data.drawnAt == null
+        && request.resource.data.createdAt == request.time;
+
+      allow update: if signedIn()
+        && resource.data.ownerUid == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['name', 'avoidSameHousehold', 'assignments', 'drawnAt'])
+        && validName(request.resource.data.name, 60)
+        && request.resource.data.avoidSameHousehold is bool
+        && (request.resource.data.assignments == null
+            || (request.resource.data.assignments is map
+                && request.resource.data.assignments.size() <= 200));
+
+      allow delete: if signedIn() && resource.data.ownerUid == request.auth.uid;
+
+      match /people/{pid} {
+        allow read: if true;
+
+        allow create: if signedIn()
+          && exists(/databases/$(database)/documents/groups/$(gid))
+          && validPerson(request.resource.data)
+          && request.resource.data.ownerUid == request.auth.uid
+          && request.resource.data.createdAt == request.time;
+
+        allow update: if signedIn()
+          && (resource.data.ownerUid == request.auth.uid || ownsGroup(gid))
+          && validPerson(request.resource.data)
+          && request.resource.data.ownerUid == resource.data.ownerUid
+          && request.resource.data.createdAt == resource.data.createdAt;
+
+        allow delete: if signedIn()
+          && (resource.data.ownerUid == request.auth.uid || ownsGroup(gid));
+      }
+    }
+  }
+}

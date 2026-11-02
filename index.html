@@ -1,0 +1,697 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow, noarchive, nosnippet, noimageindex, notranslate">
+<meta name="googlebot" content="noindex, nofollow, noarchive, nosnippet, noimageindex">
+<meta name="bingbot" content="noindex, nofollow, noarchive, nosnippet">
+<meta name="referrer" content="no-referrer">
+<title>Gift Exchange</title>
+<style>
+  :root {
+    --bg: #fbf5ec;
+    --panel: #fff;
+    --ink: #2b2140;
+    --muted: #7a7090;
+    --line: #eadfce;
+    --red: #d94848;
+    --red-dark: #b33434;
+    --green: #2f9e62;
+    --blue: #3aa0ff;
+    --soft: #f6f1fb;
+    --radius: 16px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    font-family: "Trebuchet MS", "Avenir Next", system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    min-height: 100vh;
+  }
+  header { text-align: center; padding: 22px 16px 6px; }
+  header h1 { margin: 0; font-size: clamp(1.8rem, 4vw, 2.6rem); }
+  header h1 .a { color: var(--red); }
+  header h1 .b { color: var(--green); }
+  header p { margin: 6px 0 0; color: var(--muted); font-size: 1.05rem; }
+  main {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 16px 24px 48px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  @media (max-width: 640px) { main { padding: 12px 16px 40px; } }
+
+  .panel {
+    background: var(--panel);
+    border-radius: var(--radius);
+    box-shadow: 0 4px 20px rgba(43, 33, 64, 0.08);
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .panel h2 { margin: 0; font-size: 1.2rem; }
+  .hint { margin: 0; font-size: 0.85rem; color: var(--muted); }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .row > input[type=text] { flex: 1; min-width: 140px; }
+
+  input[type=text], input[type=url] {
+    font: inherit;
+    font-size: 1rem;
+    padding: 10px 12px;
+    border: 2px solid var(--line);
+    border-radius: 10px;
+    outline: none;
+    background: #fff;
+    color: var(--ink);
+    min-width: 0;
+  }
+  input:focus { border-color: var(--blue); }
+  label.field { display: flex; flex-direction: column; gap: 4px; font-size: 0.9rem; font-weight: bold; }
+  label.field span.opt { font-weight: normal; color: var(--muted); }
+
+  .btn {
+    font: inherit;
+    font-size: 0.95rem;
+    border: none;
+    border-radius: 10px;
+    padding: 10px 16px;
+    cursor: pointer;
+    background: var(--green);
+    color: #fff;
+    font-weight: bold;
+  }
+  .btn:hover:not(:disabled) { filter: brightness(1.06); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn.red { background: var(--red); }
+  .btn.secondary { background: var(--soft); color: var(--ink); font-weight: normal; }
+  .btn.small { padding: 6px 10px; font-size: 0.85rem; }
+  .linkish {
+    font: inherit; background: none; border: none; padding: 0;
+    color: var(--muted); text-decoration: underline; cursor: pointer;
+  }
+
+  .share {
+    display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+  }
+  .share code {
+    flex: 1; min-width: 0;
+    background: var(--soft);
+    padding: 10px 12px;
+    border-radius: 10px;
+    font-size: 0.9rem;
+    overflow-wrap: anywhere;
+  }
+
+  .items-editor { display: flex; flex-direction: column; gap: 8px; }
+  .item-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; }
+  @media (max-width: 640px) {
+    .item-row { grid-template-columns: 1fr auto; }
+    .item-row input[type=url] { grid-column: 1 / -1; order: 1; }
+  }
+  .icon-btn {
+    border: none; background: transparent; color: var(--muted);
+    font-size: 1.3rem; line-height: 1; cursor: pointer; padding: 4px 8px; border-radius: 8px;
+  }
+  .icon-btn:hover { background: #f8e6e6; color: var(--red-dark); }
+
+  .people {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 16px;
+  }
+  .card {
+    background: var(--panel);
+    border-radius: var(--radius);
+    box-shadow: 0 4px 20px rgba(43, 33, 64, 0.08);
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    border-top: 6px solid var(--card-color, var(--red));
+    scroll-margin-top: 16px;
+  }
+  .card.flash { animation: flash 1.2s ease-out; }
+  @keyframes flash { 0% { box-shadow: 0 0 0 6px var(--blue); } 100% { box-shadow: 0 4px 20px rgba(43,33,64,0.08); } }
+  .card h3 { margin: 0; font-size: 1.25rem; overflow-wrap: anywhere; }
+  .tag {
+    display: inline-block; font-size: 0.75rem; padding: 2px 8px; border-radius: 999px;
+    background: var(--soft); color: var(--muted); margin-left: 6px; vertical-align: middle;
+  }
+  .card ul { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; }
+  .card li { overflow-wrap: anywhere; }
+  .card a { color: var(--blue); }
+  .card .none { color: var(--muted); font-style: italic; }
+  .buying {
+    background: #eef8f2; color: #1e6b41; border-radius: 10px; padding: 8px 10px; font-size: 0.95rem;
+  }
+  .buying a { color: inherit; font-weight: bold; }
+  .card .actions { display: flex; gap: 8px; margin-top: auto; }
+
+  .pairs { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 6px; }
+  .pairs li { background: var(--soft); border-radius: 10px; padding: 8px 10px; overflow-wrap: anywhere; }
+
+  .banner { border-radius: 12px; padding: 12px 14px; background: #fff4d6; color: #7a5b00; }
+  .banner.error { background: #fde8e8; color: var(--red-dark); }
+  .empty { color: var(--muted); font-style: italic; text-align: center; padding: 24px 0; }
+  .center { text-align: center; }
+  .groups { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+  .groups a { color: var(--blue); }
+  footer { text-align: center; padding: 0 16px 32px; color: var(--muted); font-size: 0.9rem; }
+
+  #toast {
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(20px);
+    background: var(--ink); color: #fff; padding: 10px 16px; border-radius: 10px;
+    opacity: 0; pointer-events: none; transition: opacity 0.2s, transform 0.2s; z-index: 10;
+    max-width: calc(100% - 32px);
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  #toast.error { background: var(--red-dark); }
+</style>
+</head>
+<body>
+  <header>
+    <h1><span class="a">Gift</span> <span class="b">Exchange</span> 🎁</h1>
+    <p id="subtitle"></p>
+  </header>
+  <main id="app"><p class="empty">Loading…</p></main>
+  <footer id="footer"></footer>
+  <div id="toast" role="status"></div>
+
+<script type="module">
+import { firebaseConfig } from "./firebase-config.js";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import {
+  getAuth, onAuthStateChanged, signInAnonymously, signInWithPopup, GoogleAuthProvider, signOut,
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import {
+  getFirestore, doc, collection, onSnapshot, setDoc, addDoc, updateDoc, deleteDoc,
+  serverTimestamp, query, where, getDocs,
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+const CARD_COLORS = ["#d94848", "#2f9e62", "#3aa0ff", "#e8a21a", "#8b6cff", "#e0679a", "#17a2a2", "#f07a3a"];
+const MAX_ITEMS = 20;
+
+const app = document.getElementById("app");
+const subtitle = document.getElementById("subtitle");
+const footer = document.getElementById("footer");
+const toastEl = document.getElementById("toast");
+
+const gid = new URLSearchParams(location.search).get("g");
+
+const state = {
+  user: null,
+  group: undefined,
+  people: [],
+  editingId: null,
+  myGroups: null,
+  loadError: null,
+};
+
+// ---------- tiny DOM helper ----------
+function h(tag, props = {}, ...children) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (v == null || v === false) continue;
+    if (k.startsWith("on")) el.addEventListener(k.slice(2).toLowerCase(), v);
+    else if (k === "class") el.className = v;
+    else if (k === "style") el.style.cssText = v;
+    else if (k in el && k !== "list") el[k] = v;
+    else el.setAttribute(k, v);
+  }
+  for (const c of children.flat()) {
+    if (c == null || c === false) continue;
+    el.append(c instanceof Node ? c : document.createTextNode(String(c)));
+  }
+  return el;
+}
+
+let toastTimer;
+function toast(msg, isError = false) {
+  toastEl.textContent = msg;
+  toastEl.classList.toggle("error", isError);
+  toastEl.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.classList.remove("show"), 3500);
+}
+
+function friendlyError(err) {
+  console.error(err);
+  if (err?.code === "permission-denied") return "Sorry, you're not allowed to do that.";
+  if (err?.code === "auth/popup-closed-by-user") return "Sign-in was cancelled.";
+  return "Something went wrong. Please try again.";
+}
+
+function randomId(len = 20) {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+  const bytes = crypto.getRandomValues(new Uint8Array(len));
+  return Array.from(bytes, b => chars[b % chars.length]).join("");
+}
+
+function safeUrl(raw) {
+  const s = raw.trim();
+  if (!s) return "";
+  try {
+    const u = new URL(/^https?:\/\//i.test(s) ? s : "https://" + s);
+    return u.protocol === "https:" || u.protocol === "http:" ? u.href : null;
+  } catch {
+    return null;
+  }
+}
+
+const norm = s => (s || "").trim().toLowerCase();
+const shareLink = () => `${location.origin}${location.pathname}?g=${encodeURIComponent(gid)}`;
+
+// ---------- setup check ----------
+if (firebaseConfig.apiKey.startsWith("YOUR_")) {
+  app.replaceChildren(h("div", { class: "panel" },
+    h("h2", {}, "Almost there!"),
+    h("p", {}, "Firebase isn't connected yet. Follow gifts/SETUP.md, then paste your project's config into gifts/firebase-config.js."),
+  ));
+  throw new Error("Firebase config missing");
+}
+
+const fbApp = initializeApp(firebaseConfig);
+const auth = getAuth(fbApp);
+const db = getFirestore(fbApp);
+
+onAuthStateChanged(auth, user => {
+  if (!user) {
+    signInAnonymously(auth).catch(err => toast(friendlyError(err), true));
+    return;
+  }
+  state.user = user;
+  if (!gid && !user.isAnonymous) loadMyGroups();
+  render();
+});
+
+if (gid) {
+  onSnapshot(doc(db, "groups", gid),
+    snap => { state.group = snap.exists() ? snap.data() : null; render(); },
+    err => { state.loadError = friendlyError(err); render(); });
+  onSnapshot(collection(db, "groups", gid, "people"),
+    snap => {
+      state.people = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+      render();
+    },
+    err => { state.loadError = friendlyError(err); render(); });
+}
+
+async function loadMyGroups() {
+  try {
+    const snap = await getDocs(query(collection(db, "groups"), where("ownerUid", "==", state.user.uid)));
+    state.myGroups = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch (err) {
+    state.myGroups = [];
+  }
+  render();
+}
+
+// ---------- permissions (mirrors firestore.rules) ----------
+const isGroupOwner = () => !!(state.user && state.group && state.group.ownerUid === state.user.uid);
+const canEdit = p => !!state.user && (p.ownerUid === state.user.uid || isGroupOwner());
+
+// ---------- drawing names ----------
+function shuffle(a) {
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function householdKey(p) {
+  return norm(p.household) || "solo:" + p.id;
+}
+
+// A valid draw exists exactly when no household holds more than half the people.
+function drawProblem(people, avoid) {
+  if (people.length < 2) return "You need at least 2 people to draw names.";
+  if (!avoid) return null;
+  const counts = {};
+  for (const p of people) counts[householdKey(p)] = (counts[householdKey(p)] || 0) + 1;
+  const [key, biggest] = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+  if (biggest > people.length / 2) {
+    const name = people.find(p => householdKey(p) === key).household;
+    return `The "${name}" family has too many people for everyone to get someone outside their own family. Add more people or turn off the family rule.`;
+  }
+  return null;
+}
+
+function drawNames(people, avoid) {
+  const fam = Object.fromEntries(people.map(p => [p.id, householdKey(p)]));
+  const givers = shuffle(people.map(p => p.id));
+  const ok = (g, r) => g !== r && !(avoid && fam[g] === fam[r]);
+  const taken = new Set();
+  const result = {};
+  function place(i) {
+    if (i === givers.length) return true;
+    const g = givers[i];
+    for (const r of shuffle(givers.slice())) {
+      if (taken.has(r) || !ok(g, r)) continue;
+      taken.add(r);
+      result[g] = r;
+      if (place(i + 1)) return true;
+      taken.delete(r);
+    }
+    delete result[g];
+    return false;
+  }
+  return place(0) ? result : null;
+}
+
+function drawIsStale() {
+  const a = state.group?.assignments;
+  if (!a) return false;
+  const ids = new Set(state.people.map(p => p.id));
+  const keys = Object.keys(a);
+  return keys.length !== ids.size || keys.some(k => !ids.has(k) || !ids.has(a[k]));
+}
+
+// ---------- actions ----------
+async function organizerSignIn() {
+  try {
+    await signInWithPopup(auth, new GoogleAuthProvider());
+  } catch (err) {
+    toast(friendlyError(err), true);
+  }
+}
+
+async function createGroup(name) {
+  const id = randomId();
+  try {
+    await setDoc(doc(db, "groups", id), {
+      name,
+      ownerUid: state.user.uid,
+      avoidSameHousehold: true,
+      assignments: null,
+      drawnAt: null,
+      createdAt: serverTimestamp(),
+    });
+    location.search = "?g=" + id;
+  } catch (err) {
+    toast(err?.code === "permission-denied"
+      ? "Only the organizer's Google account can create exchanges."
+      : friendlyError(err), true);
+  }
+}
+
+async function savePerson(id, data) {
+  const payload = { ...data, updatedAt: serverTimestamp() };
+  if (id) {
+    await updateDoc(doc(db, "groups", gid, "people", id), payload);
+  } else {
+    await addDoc(collection(db, "groups", gid, "people"), {
+      ...payload, ownerUid: state.user.uid, createdAt: serverTimestamp(),
+    });
+  }
+}
+
+async function removePerson(p) {
+  if (!confirm(`Remove ${p.name} and their wishlist?`)) return;
+  try {
+    await deleteDoc(doc(db, "groups", gid, "people", p.id));
+    toast(`Removed ${p.name}.`);
+  } catch (err) {
+    toast(friendlyError(err), true);
+  }
+}
+
+async function updateGroup(fields) {
+  try {
+    await updateDoc(doc(db, "groups", gid), fields);
+  } catch (err) {
+    toast(friendlyError(err), true);
+  }
+}
+
+async function doDraw() {
+  const avoid = state.group.avoidSameHousehold;
+  const problem = drawProblem(state.people, avoid);
+  if (problem) return toast(problem, true);
+  if (state.group.assignments && !confirm("Names were already drawn. Draw again? Everyone's match will change.")) return;
+  const assignments = drawNames(state.people, avoid);
+  if (!assignments) return toast("Couldn't find a valid draw. Try turning off the family rule.", true);
+  await updateGroup({ assignments, drawnAt: serverTimestamp() });
+  toast("Names drawn! 🎉");
+}
+
+async function clearDraw() {
+  if (!confirm("Clear the draw? Everyone's match will be removed.")) return;
+  await updateGroup({ assignments: null, drawnAt: null });
+}
+
+function jumpTo(id) {
+  const el = document.getElementById("p-" + id);
+  if (!el) return;
+  el.scrollIntoView({ behavior: "smooth", block: "start" });
+  el.classList.remove("flash");
+  void el.offsetWidth;
+  el.classList.add("flash");
+}
+
+// ---------- views ----------
+function render() {
+  // Don't wipe a form someone is typing in when live updates arrive.
+  const form = document.getElementById("personForm");
+  const active = document.activeElement;
+  const typing = form && form.contains(active);
+
+  renderFooter();
+
+  if (!gid) return renderLanding();
+  if (state.loadError) return app.replaceChildren(h("div", { class: "banner error" }, state.loadError));
+  if (state.group === undefined) return;
+  if (state.group === null) {
+    subtitle.textContent = "";
+    return app.replaceChildren(h("div", { class: "panel center" },
+      h("h2", {}, "Exchange not found"),
+      h("p", { class: "hint" }, "Double-check the link the organizer sent you."),
+    ));
+  }
+
+  subtitle.textContent = state.group.name;
+  document.title = `${state.group.name} · Gift Exchange`;
+
+  const sections = [shareView()];
+  if (isGroupOwner()) sections.push(organizerView());
+  if (state.group.assignments && !drawIsStale()) sections.push(pairsView());
+
+  if (typing) {
+    for (const el of [...app.children]) if (el.id !== "personFormPanel") el.remove();
+    const formPanel = document.getElementById("personFormPanel");
+    app.prepend(...sections);
+    formPanel.after(peopleView());
+    return;
+  }
+  app.replaceChildren(...sections, personFormView(), peopleView());
+}
+
+function renderFooter() {
+  const u = state.user;
+  if (u && !u.isAnonymous) {
+    footer.replaceChildren(`Signed in as ${u.email} · `,
+      h("button", { class: "linkish", onclick: () => signOut(auth) }, "Sign out"));
+  } else {
+    footer.replaceChildren(h("button", { class: "linkish", onclick: organizerSignIn }, "Organizer sign-in"));
+  }
+}
+
+function renderLanding() {
+  subtitle.textContent = "";
+  const u = state.user;
+  if (!u || u.isAnonymous) {
+    app.replaceChildren(h("div", { class: "panel center" },
+      h("h2", {}, "Looking for your family's exchange?"),
+      h("p", { class: "hint" }, "Open the link the organizer sent you. It ends in ?g=…"),
+    ));
+    return;
+  }
+  const nameInput = h("input", { type: "text", maxLength: 60, placeholder: "e.g. Family Christmas 2026", required: true });
+  const createForm = h("form", {
+    class: "row",
+    onsubmit: e => { e.preventDefault(); const n = nameInput.value.trim(); if (n) createGroup(n); },
+  }, nameInput, h("button", { class: "btn", type: "submit" }, "Create"));
+
+  const list = state.myGroups === null
+    ? h("p", { class: "hint" }, "Loading your exchanges…")
+    : state.myGroups.length === 0
+      ? h("p", { class: "hint" }, "You haven't made any exchanges yet.")
+      : h("ul", { class: "groups" }, state.myGroups.map(g =>
+          h("li", {}, h("a", { href: `?g=${encodeURIComponent(g.id)}` }, g.name))));
+
+  app.replaceChildren(
+    h("div", { class: "panel" }, h("h2", {}, "Start a new gift exchange"), createForm),
+    h("div", { class: "panel" }, h("h2", {}, "Your exchanges"), list),
+  );
+}
+
+function shareView() {
+  const link = shareLink();
+  return h("div", { class: "panel" },
+    h("h2", {}, "Invite your family"),
+    h("p", { class: "hint" }, "Anyone with this link can see the wishlists and add themselves. Only share it with family."),
+    h("div", { class: "share" },
+      h("code", {}, link),
+      h("button", {
+        class: "btn secondary",
+        onclick: async () => {
+          try { await navigator.clipboard.writeText(link); toast("Link copied!"); }
+          catch { toast("Couldn't copy. Select the link and copy it instead.", true); }
+        },
+      }, "📋 Copy link"),
+    ),
+  );
+}
+
+function organizerView() {
+  const g = state.group;
+  const drawn = !!g.assignments;
+  const stale = drawIsStale();
+  return h("div", { class: "panel" },
+    h("h2", {}, "Organizer tools"),
+    h("label", { class: "row" },
+      h("input", {
+        type: "checkbox",
+        checked: g.avoidSameHousehold,
+        onchange: e => updateGroup({ avoidSameHousehold: e.target.checked }),
+      }),
+      "Don't match people from the same family",
+    ),
+    stale && h("div", { class: "banner" }, "People were added or removed since names were drawn. Draw again to include everyone."),
+    h("div", { class: "row" },
+      h("button", { class: "btn red", onclick: doDraw, disabled: state.people.length < 2 },
+        drawn ? "🎲 Draw names again" : "🎲 Draw names"),
+      drawn && h("button", { class: "btn secondary", onclick: clearDraw }, "Clear draw"),
+    ),
+    h("p", { class: "hint" }, `${state.people.length} ${state.people.length === 1 ? "person has" : "people have"} joined.`),
+  );
+}
+
+function pairsView() {
+  const byId = Object.fromEntries(state.people.map(p => [p.id, p]));
+  const a = state.group.assignments;
+  return h("div", { class: "panel" },
+    h("h2", {}, "Who's buying for whom"),
+    h("ul", { class: "pairs" }, state.people.map(p =>
+      h("li", {}, h("strong", {}, p.name), " → ",
+        h("a", { href: "#p-" + a[p.id], onclick: e => { e.preventDefault(); jumpTo(a[p.id]); } }, byId[a[p.id]].name)),
+    )),
+  );
+}
+
+function itemRow(item = { text: "", url: "" }) {
+  const row = h("div", { class: "item-row" },
+    h("input", { type: "text", maxLength: 120, placeholder: "Wish (e.g. LEGO set, cozy socks)", value: item.text, "data-role": "text" }),
+    h("input", { type: "url", maxLength: 500, placeholder: "Link (optional)", value: item.url || "", "data-role": "url" }),
+    h("button", { type: "button", class: "icon-btn", title: "Remove item", "aria-label": "Remove item", onclick: () => row.remove() }, "×"),
+  );
+  return row;
+}
+
+function personFormView() {
+  const editing = state.editingId ? state.people.find(p => p.id === state.editingId) : null;
+  const households = [...new Set(state.people.map(p => p.household.trim()).filter(Boolean))].sort();
+
+  const nameInput = h("input", { type: "text", maxLength: 50, required: true, placeholder: "e.g. Grandma Jo", value: editing?.name || "" });
+  const famInput = h("input", { type: "text", maxLength: 40, list: "households", placeholder: "e.g. Smiths", value: editing?.household || "" });
+  const itemsEl = h("div", { class: "items-editor" });
+  const startItems = editing?.items?.length ? editing.items : [{}, {}, {}];
+  startItems.forEach(i => itemsEl.append(itemRow({ text: i.text || "", url: i.url || "" })));
+
+  const saveBtn = h("button", { class: "btn", type: "submit" }, editing ? "Save changes" : "Add to the exchange");
+
+  async function onSubmit(e) {
+    e.preventDefault();
+    const name = nameInput.value.trim();
+    if (!name) return toast("Please add a name.", true);
+    const items = [];
+    for (const row of itemsEl.children) {
+      const text = row.querySelector('[data-role="text"]').value.trim();
+      const url = safeUrl(row.querySelector('[data-role="url"]').value);
+      if (url === null) return toast(`"${row.querySelector('[data-role="url"]').value}" doesn't look like a web link.`, true);
+      if (text || url) items.push({ text: text || url, url });
+    }
+    if (items.length > MAX_ITEMS) return toast(`Please keep it to ${MAX_ITEMS} items or fewer.`, true);
+    saveBtn.disabled = true;
+    try {
+      await savePerson(editing?.id, { name, household: famInput.value.trim(), items });
+      toast(editing ? "Saved!" : `${name} has joined! 🎁`);
+      state.editingId = null;
+      document.activeElement?.blur();
+      render();
+    } catch (err) {
+      toast(friendlyError(err), true);
+      saveBtn.disabled = false;
+    }
+  }
+
+  return h("div", { class: "panel", id: "personFormPanel" },
+    h("h2", {}, editing ? `Editing ${editing.name}` : "Add yourself (or your kids!)"),
+    h("form", { id: "personForm", onsubmit: onSubmit, style: "display:flex;flex-direction:column;gap:12px" },
+      h("div", { class: "row" },
+        h("label", { class: "field", style: "flex:1;min-width:180px" }, "Name", nameInput),
+        h("label", { class: "field", style: "flex:1;min-width:180px" },
+          h("span", {}, "Family ", h("span", { class: "opt" }, "(optional, so families don't draw each other)")), famInput),
+        h("datalist", { id: "households" }, households.map(f => h("option", { value: f }))),
+      ),
+      h("div", { class: "field" }, "Wishlist"),
+      itemsEl,
+      h("div", { class: "row" },
+        h("button", {
+          type: "button", class: "btn secondary small",
+          onclick: () => {
+            if (itemsEl.children.length >= MAX_ITEMS) return toast(`That's the max of ${MAX_ITEMS} items.`, true);
+            itemsEl.append(itemRow());
+          },
+        }, "+ Add another item"),
+      ),
+      h("div", { class: "row" },
+        saveBtn,
+        editing && h("button", { type: "button", class: "btn secondary", onclick: () => { state.editingId = null; render(); } }, "Cancel"),
+      ),
+    ),
+  );
+}
+
+function peopleView() {
+  if (!state.people.length) {
+    return h("div", { class: "panel" }, h("p", { class: "empty" }, "Nobody has joined yet. Be the first!"));
+  }
+  const byId = Object.fromEntries(state.people.map(p => [p.id, p]));
+  const a = !drawIsStale() && state.group.assignments;
+  return h("section", { class: "people" }, state.people.map((p, i) => {
+    const target = a && byId[a[p.id]];
+    return h("article", { class: "card", id: "p-" + p.id, style: `--card-color:${CARD_COLORS[i % CARD_COLORS.length]}` },
+      h("h3", {}, p.name, p.household && h("span", { class: "tag" }, p.household)),
+      target && h("div", { class: "buying" }, "🎁 Buying for ",
+        h("a", { href: "#p-" + target.id, onclick: e => { e.preventDefault(); jumpTo(target.id); } }, target.name)),
+      p.items?.length
+        ? h("ul", {}, p.items.map(item => {
+            const url = item.url && safeUrl(item.url);
+            return h("li", {}, url
+              ? h("a", { href: url, target: "_blank", rel: "noopener noreferrer" }, item.text || url)
+              : item.text);
+          }))
+        : h("p", { class: "none" }, "No wishes yet."),
+      canEdit(p) && h("div", { class: "actions" },
+        h("button", {
+          class: "btn secondary small",
+          onclick: () => { state.editingId = p.id; render(); document.getElementById("personFormPanel").scrollIntoView({ behavior: "smooth" }); },
+        }, "✏️ Edit"),
+        h("button", { class: "btn secondary small", onclick: () => removePerson(p) }, "🗑 Remove"),
+      ),
+    );
+  }));
+}
+
+render();
+</script>
+</body>
+</html>
