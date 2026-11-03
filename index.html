@@ -363,7 +363,7 @@ const state = {
   editingId: null,
   loadError: null,
   isOrganizer: false,
-  access: "checking", // "checking" | "locked" | "member"
+  access: "checking",
 };
 
 function loadStore(key) {
@@ -378,7 +378,6 @@ function rememberGroup(id, patch) {
   saveStore(GROUPS_KEY, all);
 }
 
-// ---------- tiny DOM helper ----------
 function h(tag, props = {}, ...children) {
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(props)) {
@@ -448,7 +447,6 @@ async function copyText(text, msg) {
   }
 }
 
-// ---------- setup check ----------
 if (firebaseConfig.apiKey.startsWith("YOUR_")) {
   app.replaceChildren(h("div", { class: "panel" },
     h("h2", {}, "Almost there!"),
@@ -539,10 +537,8 @@ async function unlock(password) {
   return true;
 }
 
-// ---------- permissions (mirrors firestore.rules) ----------
 const canEdit = () => state.access === "member";
 
-// ---------- drawing names ----------
 function shuffle(a) {
   for (let i = a.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -555,14 +551,11 @@ function householdKey(p) {
   return norm(p.household) || "solo:" + p.id;
 }
 
-// Fixed matches whose people both still exist.
 function activeFixed() {
   const ids = new Set(state.people.map(p => p.id));
   return Object.fromEntries(Object.entries(state.group?.fixed || {}).filter(([g, r]) => ids.has(g) && ids.has(r)));
 }
 
-// Without fixed matches, a valid draw exists exactly when no household holds
-// more than half the people. With them, drawNames' search is the only check.
 function drawProblem(people, avoid, fixed) {
   if (people.length < 2) return "You need at least 2 people to draw names.";
   if (!avoid || Object.keys(fixed).length) return null;
@@ -576,15 +569,13 @@ function drawProblem(people, avoid, fixed) {
   return null;
 }
 
-// Fixed matches are placed first and override the family rule.
 function drawNames(people, avoid, fixed = {}) {
   const fam = Object.fromEntries(people.map(p => [p.id, householdKey(p)]));
   const ids = people.map(p => p.id);
   const ok = (g, r) => g !== r && !(avoid && fam[g] === fam[r]);
   const taken = new Set(Object.values(fixed));
   const result = { ...fixed };
-  // Big families are the hardest to place, so handle their givers first and
-  // try their members as receivers first; random order within a family size.
+  // Big families are the hardest to place, so their givers and receivers go first.
   const famSize = {};
   for (const id of ids) famSize[fam[id]] = (famSize[fam[id]] || 0) + 1;
   const bySize = list => shuffle(list).sort((x, y) => famSize[fam[y]] - famSize[fam[x]]);
@@ -615,7 +606,6 @@ function drawIsStale() {
   return keys.length !== ids.size || keys.some(k => !ids.has(k) || !ids.has(a[k]));
 }
 
-// ---------- actions ----------
 async function createGroup(name, password) {
   const id = randomId();
   const key = randomId(32);
@@ -751,7 +741,6 @@ function avatar(p, small = false) {
   return h("span", { class: cls, style, "aria-hidden": "true" }, (p.name || "?").trim().charAt(0).toUpperCase());
 }
 
-// Center-crops to a square and shrinks it so it fits comfortably in a Firestore document.
 function loadImage(file) {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
@@ -762,7 +751,6 @@ function loadImage(file) {
   });
 }
 
-// Shrinks the chosen square of the image so it fits comfortably in a Firestore document.
 function exportPhoto(img, sx, sy, side) {
   const canvas = document.createElement("canvas");
   canvas.width = canvas.height = PHOTO_SIZE;
@@ -776,7 +764,6 @@ function exportPhoto(img, sx, sy, side) {
   throw new Error("image too large");
 }
 
-// Opens a crop window; resolves with the cropped photo, or null if cancelled.
 function cropPhoto(img) {
   return new Promise(resolve => {
     const V = Math.min(300, innerWidth - 80);
@@ -827,7 +814,6 @@ function cropPhoto(img) {
       oninput: () => zoomTo(minScale * Number(slider.value)),
     });
 
-    // Pointer tracking handles both one-finger/mouse drags and two-finger pinches.
     const pointers = new Map();
     let pinch = null;
     const local = e => {
@@ -906,7 +892,6 @@ function cropPhoto(img) {
   });
 }
 
-// ---------- elves ----------
 const ELF_OUTFITS = [
   { name: "Classic",     hat: "#2e9e4f", trim: "#ffffff", pom: "#f5d142", tunic: "#2e9e4f", collar: "#d94848", belt: "#3b2a1a", buckle: "#f5c542", legA: "#d94848", legB: "#ffffff", shoe: "#2e9e4f", bell: true },
   { name: "Candy Cane",  hat: "#d94848", trim: "#ffffff", pom: "#ffffff", tunic: "#d94848", collar: "#ffffff", belt: "#222222", buckle: "#f5c542", legA: "#ffffff", legB: "#d94848", shoe: "#d94848", bell: false },
@@ -918,8 +903,7 @@ const ELF_OUTFITS = [
   { name: "Midnight",    hat: "#2b2140", trim: "#9fb4ff", pom: "#9fb4ff", tunic: "#3d2f63", collar: "#9fb4ff", belt: "#111111", buckle: "#c0c8ff", legA: "#9fb4ff", legB: "#2b2140", shoe: "#111111", bell: false },
 ];
 
-// Only constant colors and numbers go into this markup; the face photo and
-// initial are attached afterwards through DOM properties.
+// Only constants go in this markup; the face photo and initial are set through the DOM.
 function elfSvg(o, i, idPrefix = "elf") {
   const flip = i % 2 === 1;
   const tipX = flip ? 20 : 100;
@@ -964,8 +948,6 @@ function elfSvg(o, i, idPrefix = "elf") {
 </svg>`;
 }
 
-// Outfits follow each person's position in the (name-sorted) list, so someone
-// wears the same outfit in the crew and in the peek reveal.
 function makeElf(p, props, idPrefix = "elf") {
   const i = Math.max(0, state.people.findIndex(q => q.id === p.id));
   const el = h(props.onclick ? "button" : "div", { class: "elf", type: props.onclick ? "button" : null, ...props });
@@ -986,7 +968,6 @@ function elfView() {
   );
 }
 
-// ---------- peek ----------
 const matchesPublic = () => state.group?.showMatches !== false;
 const drawReady = () => !!state.group?.assignments && !drawIsStale();
 
@@ -1053,7 +1034,6 @@ function openPeek(giverId) {
   }, reduced ? 50 : 1800));
 }
 
-// ---------- confetti ----------
 const confettiCanvas = document.getElementById("confetti");
 const cctx = confettiCanvas.getContext("2d");
 let confettiPieces = [];
@@ -1111,9 +1091,7 @@ function jumpTo(id) {
   el.classList.add("flash");
 }
 
-// ---------- views ----------
-// resetForm rebuilds the add/edit form; otherwise live updates keep a form that
-// has focus or unsaved changes (e.g. while the photo crop window is open).
+// Live updates keep a form with focus or unsaved changes; resetForm rebuilds it.
 function render(resetForm = false) {
   const form = document.getElementById("personForm");
   const active = document.activeElement;

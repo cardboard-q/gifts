@@ -1,16 +1,5 @@
 rules_version = '2';
 
-// Paste into Firebase console → Firestore Database → Rules, then click Publish.
-//
-// Each exchange has two secrets nobody but organizers can read:
-//   groups/{gid}/secret/family  the family password
-//   groups/{gid}/secret/admin   the organizer key (from the organizer link)
-// Unlocking writes the password into groups/{gid}/members/{uid}; the rules only
-// allow that write when it matches, and from then on that browser is a member.
-// Organizer links work the same way through groups/{gid}/organizers/{uid}.
-//
-// Rules can't rate-limit, so a password could in theory be brute-forced, but
-// only by someone who already has the exchange's unguessable link.
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -65,8 +54,7 @@ service cloud.firestore {
       return !('fixed' in d) || (d.fixed is map && d.fixed.size() <= 200);
     }
 
-    // Photos are small JPEG/WebP thumbnails stored inline as data URLs
-    // (Cloud Storage would need the paid plan). Keep in sync with MAX_PHOTO_CHARS.
+    // Keep in sync with MAX_PHOTO_CHARS.
     function validPhoto(d) {
       return !('photo' in d)
         || d.photo == ''
@@ -75,8 +63,7 @@ service cloud.firestore {
             && d.photo.matches('data:image/(jpeg|webp);base64,[A-Za-z0-9+/=]+'));
     }
 
-    // Rules can't loop over list items, so item contents are only bounded by
-    // the item count and Firestore's 1 MiB document limit.
+    // Rules can't loop over list items, so only the item count is bounded.
     function validPerson(d) {
       return d.keys().hasOnly(['name', 'household', 'items', 'photo', 'createdAt', 'updatedAt'])
         && validName(d.name, 50)
@@ -90,7 +77,6 @@ service cloud.firestore {
       allow get: if isMember(gid);
       allow list: if false;
 
-      // Created in one batch with both secrets and the creator's organizer and member docs.
       allow create: if signedIn()
         && gid.size() >= 16
         && request.resource.data.keys().hasOnly(['name', 'avoidSameHousehold', 'showMatches', 'assignments', 'fixed', 'drawnAt', 'createdAt'])
@@ -118,13 +104,11 @@ service cloud.firestore {
       match /secret/{name} {
         allow get: if isOrganizer(gid);
         allow list: if false;
-        // Only while the group itself is being created in the same batch.
         allow create: if signedIn()
           && (name == 'admin' || name == 'family')
           && !exists(groupPath(gid))
           && existsAfter(groupPath(gid))
           && validKey(request.resource.data, name == 'admin' ? 24 : 8);
-        // The organizer can change the family password.
         allow update: if isOrganizer(gid)
           && name == 'family'
           && validKey(request.resource.data, 8);
