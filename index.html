@@ -133,7 +133,34 @@
   }
   .card.flash { animation: flash 1.2s ease-out; }
   @keyframes flash { 0% { box-shadow: 0 0 0 6px var(--blue); } 100% { box-shadow: 0 4px 20px rgba(43,33,64,0.08); } }
-  .card h3 { margin: 0; font-size: 1.25rem; overflow-wrap: anywhere; }
+  .card h3 { margin: 0; font-size: 1.25rem; overflow-wrap: anywhere; flex: 1; min-width: 0; }
+  .card-head { display: flex; align-items: center; gap: 12px; }
+  .avatar {
+    flex: none;
+    width: var(--size, 52px); height: var(--size, 52px);
+    border-radius: 50%;
+    object-fit: cover;
+    display: inline-flex; align-items: center; justify-content: center;
+    color: #fff; font-weight: bold; font-size: calc(var(--size, 52px) * 0.42);
+    border: 3px solid #fff;
+    box-shadow: 0 0 0 2px var(--card-color, var(--line));
+    background: var(--card-color, var(--muted));
+    vertical-align: middle;
+  }
+  .avatar.small { --size: 28px; border-width: 2px; box-shadow: none; }
+  .photo-picker { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .photo-picker input[type=file] { display: none; }
+  select {
+    font: inherit; font-size: 0.95rem; padding: 8px 10px;
+    border: 2px solid var(--line); border-radius: 10px; background: #fff; color: var(--ink);
+    min-width: 0; flex: 1;
+  }
+  .fixed-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+  .fixed-list li {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--soft); border-radius: 10px; padding: 6px 6px 6px 10px; overflow-wrap: anywhere;
+  }
+  .fixed-list li span { flex: 1; }
   .tag {
     display: inline-block; font-size: 0.75rem; padding: 2px 8px; border-radius: 999px;
     background: var(--soft); color: var(--muted); margin-left: 6px; vertical-align: middle;
@@ -149,7 +176,10 @@
   .card .actions { display: flex; gap: 8px; margin-top: auto; }
 
   .pairs { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 6px; }
-  .pairs li { background: var(--soft); border-radius: 10px; padding: 8px 10px; overflow-wrap: anywhere; }
+  .pairs li {
+    background: var(--soft); border-radius: 10px; padding: 8px 10px; overflow-wrap: anywhere;
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  }
 
   .banner { border-radius: 12px; padding: 12px 14px; background: #fff4d6; color: #7a5b00; }
   .banner.error { background: #fde8e8; color: var(--red-dark); }
@@ -189,6 +219,9 @@ const CARD_COLORS = ["#d94848", "#2f9e62", "#3aa0ff", "#e8a21a", "#8b6cff", "#e0
 const MAX_ITEMS = 20;
 const GROUPS_KEY = "gifts.groups";
 const MIN_PASSWORD = 8;
+const PHOTO_SIZE = 160;
+// Keep in sync with the photo size limit in firestore.rules.
+const MAX_PHOTO_CHARS = 100000;
 const PASS_WORDS = [
   "jolly", "cozy", "merry", "snowy", "sparkly", "frosty", "happy", "sleepy", "giggly", "toasty",
   "pinecone", "reindeer", "cocoa", "mitten", "snowman", "cookie", "candle", "sleigh", "penguin", "pajama",
@@ -404,10 +437,17 @@ function householdKey(p) {
   return norm(p.household) || "solo:" + p.id;
 }
 
-// A valid draw exists exactly when no household holds more than half the people.
-function drawProblem(people, avoid) {
+// Fixed matches whose people both still exist.
+function activeFixed() {
+  const ids = new Set(state.people.map(p => p.id));
+  return Object.fromEntries(Object.entries(state.group?.fixed || {}).filter(([g, r]) => ids.has(g) && ids.has(r)));
+}
+
+// Without fixed matches, a valid draw exists exactly when no household holds
+// more than half the people. With them, drawNames' search is the only check.
+function drawProblem(people, avoid, fixed) {
   if (people.length < 2) return "You need at least 2 people to draw names.";
-  if (!avoid) return null;
+  if (!avoid || Object.keys(fixed).length) return null;
   const counts = {};
   for (const p of people) counts[householdKey(p)] = (counts[householdKey(p)] || 0) + 1;
   const [key, biggest] = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
@@ -418,16 +458,25 @@ function drawProblem(people, avoid) {
   return null;
 }
 
-function drawNames(people, avoid) {
+// Fixed matches are placed first and override the family rule.
+function drawNames(people, avoid, fixed = {}) {
   const fam = Object.fromEntries(people.map(p => [p.id, householdKey(p)]));
-  const givers = shuffle(people.map(p => p.id));
+  const ids = people.map(p => p.id);
   const ok = (g, r) => g !== r && !(avoid && fam[g] === fam[r]);
-  const taken = new Set();
-  const result = {};
+  const taken = new Set(Object.values(fixed));
+  const result = { ...fixed };
+  // Big families are the hardest to place, so handle their givers first and
+  // try their members as receivers first; random order within a family size.
+  const famSize = {};
+  for (const id of ids) famSize[fam[id]] = (famSize[fam[id]] || 0) + 1;
+  const bySize = list => shuffle(list).sort((x, y) => famSize[fam[y]] - famSize[fam[x]]);
+  const givers = bySize(ids.filter(id => !(id in fixed)));
+  let budget = 200000;
   function place(i) {
     if (i === givers.length) return true;
+    if (--budget < 0) return false;
     const g = givers[i];
-    for (const r of shuffle(givers.slice())) {
+    for (const r of avoid ? bySize(ids.slice()) : shuffle(ids.slice())) {
       if (taken.has(r) || !ok(g, r)) continue;
       taken.add(r);
       result[g] = r;
@@ -536,18 +585,72 @@ async function updateGroup(fields) {
 
 async function doDraw() {
   const avoid = state.group.avoidSameHousehold;
-  const problem = drawProblem(state.people, avoid);
+  const fixed = activeFixed();
+  const problem = drawProblem(state.people, avoid, fixed);
   if (problem) return toast(problem, true);
   if (state.group.assignments && !confirm("Names were already drawn. Draw again? Everyone's match will change.")) return;
-  const assignments = drawNames(state.people, avoid);
-  if (!assignments) return toast("Couldn't find a valid draw. Try turning off the family rule.", true);
+  const assignments = drawNames(state.people, avoid, fixed);
+  if (!assignments) return toast("Couldn't find a valid draw with these rules. Try removing a fixed match or turning off the family rule.", true);
   await updateGroup({ assignments, drawnAt: serverTimestamp() });
   toast("Names drawn! 🎉");
+}
+
+async function addFixed(giver, receiver) {
+  const fixed = activeFixed();
+  if (!giver || !receiver) return toast("Pick both people first.", true);
+  if (giver === receiver) return toast("Someone can't buy for themselves.", true);
+  if (giver in fixed) return toast("That person already has a fixed match.", true);
+  if (Object.values(fixed).includes(receiver)) return toast("Someone is already set to buy for that person.", true);
+  await updateGroup({ fixed: { ...fixed, [giver]: receiver } });
+}
+
+async function removeFixed(giver) {
+  const fixed = activeFixed();
+  delete fixed[giver];
+  await updateGroup({ fixed });
 }
 
 async function clearDraw() {
   if (!confirm("Clear the draw? Everyone's match will be removed.")) return;
   await updateGroup({ assignments: null, drawnAt: null });
+}
+
+function personColor(p) {
+  let hash = 0;
+  for (const ch of p.id) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+  return CARD_COLORS[hash % CARD_COLORS.length];
+}
+
+function isPhoto(s) {
+  return typeof s === "string" && /^data:image\/(jpeg|webp);base64,/.test(s);
+}
+
+function avatar(p, small = false) {
+  const style = `--card-color:${personColor(p)}`;
+  const cls = "avatar" + (small ? " small" : "");
+  if (isPhoto(p.photo)) return h("img", { class: cls, src: p.photo, alt: "", style });
+  return h("span", { class: cls, style, "aria-hidden": "true" }, (p.name || "?").trim().charAt(0).toUpperCase());
+}
+
+// Center-crops to a square and shrinks it so it fits comfortably in a Firestore document.
+async function resizePhoto(file) {
+  const img = await new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const el = new Image();
+    el.onload = () => { URL.revokeObjectURL(url); resolve(el); };
+    el.onerror = () => { URL.revokeObjectURL(url); reject(new Error("unreadable image")); };
+    el.src = url;
+  });
+  const side = Math.min(img.naturalWidth, img.naturalHeight);
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = PHOTO_SIZE;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(img, (img.naturalWidth - side) / 2, (img.naturalHeight - side) / 2, side, side, 0, 0, PHOTO_SIZE, PHOTO_SIZE);
+  for (const q of [0.82, 0.7, 0.55, 0.4]) {
+    const data = canvas.toDataURL("image/jpeg", q);
+    if (data.length <= MAX_PHOTO_CHARS) return data;
+  }
+  throw new Error("image too large");
 }
 
 function jumpTo(id) {
@@ -715,6 +818,7 @@ function organizerView() {
       }),
       "Don't match people from the same family",
     ),
+    fixedMatchesView(),
     stale && h("div", { class: "banner" }, "People were added or removed since names were drawn. Draw again to include everyone."),
     h("div", { class: "row" },
       h("button", { class: "btn red", onclick: doDraw, disabled: state.people.length < 2 },
@@ -736,13 +840,36 @@ function organizerView() {
   );
 }
 
+function fixedMatchesView() {
+  const byId = Object.fromEntries(state.people.map(p => [p.id, p]));
+  const fixed = activeFixed();
+  const giverSel = h("select", { "aria-label": "Giver" },
+    h("option", { value: "" }, "Pick a giver…"),
+    state.people.filter(p => !(p.id in fixed)).map(p => h("option", { value: p.id }, p.name)));
+  const receiverSel = h("select", { "aria-label": "Receiver" },
+    h("option", { value: "" }, "Pick who they buy for…"),
+    state.people.filter(p => !Object.values(fixed).includes(p.id)).map(p => h("option", { value: p.id }, p.name)));
+  return h("div", { style: "display:flex;flex-direction:column;gap:8px" },
+    h("div", { class: "field" }, "Fixed matches"),
+    h("p", { class: "hint" }, "Make sure certain people buy for certain people. Everyone else is drawn at random. Fixed matches ignore the family rule."),
+    Object.keys(fixed).length > 0 && h("ul", { class: "fixed-list" }, Object.entries(fixed).map(([g, r]) =>
+      h("li", {},
+        avatar(byId[g], true), h("span", {}, h("strong", {}, byId[g].name), " always buys for ", h("strong", {}, byId[r].name)),
+        h("button", { class: "icon-btn", title: "Remove", "aria-label": `Remove fixed match for ${byId[g].name}`, onclick: () => removeFixed(g) }, "×")))),
+    state.people.length >= 2 && h("div", { class: "row" },
+      giverSel, receiverSel,
+      h("button", { class: "btn secondary small", onclick: () => addFixed(giverSel.value, receiverSel.value) }, "+ Add"),
+    ),
+  );
+}
+
 function pairsView() {
   const byId = Object.fromEntries(state.people.map(p => [p.id, p]));
   const a = state.group.assignments;
   return h("div", { class: "panel" },
     h("h2", {}, "Who's buying for whom"),
     h("ul", { class: "pairs" }, state.people.map(p =>
-      h("li", {}, h("strong", {}, p.name), " → ",
+      h("li", {}, avatar(p, true), h("strong", {}, p.name), " → ", avatar(byId[a[p.id]], true),
         h("a", { href: "#p-" + a[p.id], onclick: e => { e.preventDefault(); jumpTo(a[p.id]); } }, byId[a[p.id]].name)),
     )),
   );
@@ -750,7 +877,7 @@ function pairsView() {
 
 function itemRow(item = { text: "", url: "" }) {
   const row = h("div", { class: "item-row" },
-    h("input", { type: "text", maxLength: 120, placeholder: "Wish (e.g. LEGO set, cozy socks)", value: item.text, "data-role": "text" }),
+    h("input", { type: "text", maxLength: 120, placeholder: "new socks, a box of oranges, etc", value: item.text, "data-role": "text" }),
     h("input", { type: "url", maxLength: 500, placeholder: "Link (optional)", value: item.url || "", "data-role": "url" }),
     h("button", { type: "button", class: "icon-btn", title: "Remove item", "aria-label": "Remove item", onclick: () => row.remove() }, "×"),
   );
@@ -764,8 +891,31 @@ function personFormView() {
   const nameInput = h("input", { type: "text", maxLength: 50, required: true, placeholder: "e.g. Grandma Jo", value: editing?.name || "" });
   const famInput = h("input", { type: "text", maxLength: 40, list: "households", placeholder: "e.g. Smiths", value: editing?.household || "" });
   const itemsEl = h("div", { class: "items-editor" });
-  const startItems = editing?.items?.length ? editing.items : [{}, {}, {}];
+  const startItems = editing?.items?.length ? editing.items : [{}];
   startItems.forEach(i => itemsEl.append(itemRow({ text: i.text || "", url: i.url || "" })));
+
+  let photo = isPhoto(editing?.photo) ? editing.photo : "";
+  const preview = h("span", {});
+  const removePhotoBtn = h("button", { type: "button", class: "btn secondary small" }, "Remove photo");
+  const fileInput = h("input", { type: "file", accept: "image/*" });
+  function showPhoto() {
+    preview.replaceChildren(avatar({ id: editing?.id || "new", name: nameInput.value || "?", photo }));
+    removePhotoBtn.hidden = !photo;
+  }
+  removePhotoBtn.addEventListener("click", () => { photo = ""; showPhoto(); });
+  fileInput.addEventListener("change", async () => {
+    const file = fileInput.files[0];
+    fileInput.value = "";
+    if (!file) return;
+    try {
+      photo = await resizePhoto(file);
+      showPhoto();
+    } catch {
+      toast("Couldn't use that picture. Try a JPG or PNG.", true);
+    }
+  });
+  nameInput.addEventListener("input", () => { if (!photo) showPhoto(); });
+  showPhoto();
 
   const saveBtn = h("button", { class: "btn", type: "submit" }, editing ? "Save changes" : "Add to the exchange");
 
@@ -783,7 +933,7 @@ function personFormView() {
     if (items.length > MAX_ITEMS) return toast(`Please keep it to ${MAX_ITEMS} items or fewer.`, true);
     saveBtn.disabled = true;
     try {
-      await savePerson(editing?.id, { name, household: famInput.value.trim(), items });
+      await savePerson(editing?.id, { name, household: famInput.value.trim(), items, photo });
       toast(editing ? "Saved!" : `${name} has joined! 🎁`);
       state.editingId = null;
       document.activeElement?.blur();
@@ -802,6 +952,12 @@ function personFormView() {
         h("label", { class: "field", style: "flex:1;min-width:180px" },
           h("span", {}, "Family ", h("span", { class: "opt" }, "(optional, so families don't draw each other)")), famInput),
         h("datalist", { id: "households" }, households.map(f => h("option", { value: f }))),
+      ),
+      h("div", { class: "field" }, h("span", {}, "Picture ", h("span", { class: "opt" }, "(optional)"))),
+      h("div", { class: "photo-picker" },
+        preview,
+        h("label", { class: "btn secondary small", style: "cursor:pointer" }, "📷 Choose picture", fileInput),
+        removePhotoBtn,
       ),
       h("div", { class: "field" }, "Wishlist"),
       itemsEl,
@@ -828,10 +984,12 @@ function peopleView() {
   }
   const byId = Object.fromEntries(state.people.map(p => [p.id, p]));
   const a = !drawIsStale() && state.group.assignments;
-  return h("section", { class: "people" }, state.people.map((p, i) => {
+  return h("section", { class: "people" }, state.people.map(p => {
     const target = a && byId[a[p.id]];
-    return h("article", { class: "card", id: "p-" + p.id, style: `--card-color:${CARD_COLORS[i % CARD_COLORS.length]}` },
-      h("h3", {}, p.name, p.household && h("span", { class: "tag" }, p.household)),
+    return h("article", { class: "card", id: "p-" + p.id, style: `--card-color:${personColor(p)}` },
+      h("div", { class: "card-head" },
+        avatar(p),
+        h("h3", {}, p.name, p.household && h("span", { class: "tag" }, p.household))),
       target && h("div", { class: "buying" }, "🎁 Buying for ",
         h("a", { href: "#p-" + target.id, onclick: e => { e.preventDefault(); jumpTo(target.id); } }, target.name)),
       p.items?.length
