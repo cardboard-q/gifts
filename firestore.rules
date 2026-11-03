@@ -2,10 +2,15 @@ rules_version = '2';
 
 // Paste into Firebase console → Firestore Database → Rules, then click Publish.
 //
-// Each exchange has a secret organizer key stored in groups/{gid}/secret/admin,
-// which only existing organizers can read. Opening the organizer link writes the key into
-// groups/{gid}/organizers/{uid}; the rules only allow that write when the key
-// matches, and from then on that browser is an organizer.
+// Each exchange has two secrets nobody but organizers can read:
+//   groups/{gid}/secret/family  the family password
+//   groups/{gid}/secret/admin   the organizer key (from the organizer link)
+// Unlocking writes the password into groups/{gid}/members/{uid}; the rules only
+// allow that write when it matches, and from then on that browser is a member.
+// Organizer links work the same way through groups/{gid}/organizers/{uid}.
+//
+// Rules can't rate-limit, so a password could in theory be brute-forced, but
+// only by someone who already has the exchange's unguessable link.
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -17,36 +22,39 @@ service cloud.firestore {
       return /databases/$(database)/documents/groups/$(gid);
     }
 
-    function secretPath(gid) {
-      return /databases/$(database)/documents/groups/$(gid)/secret/admin;
+    function secretPath(gid, name) {
+      return /databases/$(database)/documents/groups/$(gid)/secret/$(name);
     }
 
     function organizerPath(gid) {
       return /databases/$(database)/documents/groups/$(gid)/organizers/$(request.auth.uid);
     }
 
+    function memberPath(gid) {
+      return /databases/$(database)/documents/groups/$(gid)/members/$(request.auth.uid);
+    }
+
     function isOrganizer(gid) {
       return signedIn() && exists(organizerPath(gid));
+    }
+
+    function isMember(gid) {
+      return signedIn() && (exists(memberPath(gid)) || exists(organizerPath(gid)));
     }
 
     function validName(s, max) {
       return s is string && s.size() > 0 && s.size() <= max;
     }
 
+    function validKey(d, minSize) {
+      return d.keys().hasOnly(['key'])
+        && d.key is string
+        && d.key.size() >= minSize
+        && d.key.size() <= 100;
+    }
+
     function validAssignments(a) {
       return a == null || (a is map && a.size() <= 200);
-    }
-
-    function personSecretPath(gid, pid) {
-      return /databases/$(database)/documents/groups/$(gid)/people/$(pid)/secret/edit;
-    }
-
-    function editorPath(gid, pid) {
-      return /databases/$(database)/documents/groups/$(gid)/people/$(pid)/editors/$(request.auth.uid);
-    }
-
-    function canEditPerson(gid, pid) {
-      return signedIn() && (exists(editorPath(gid, pid)) || isOrganizer(gid));
     }
 
     // Rules can't loop over list items, so item contents are only bounded by
@@ -60,11 +68,10 @@ service cloud.firestore {
     }
 
     match /groups/{gid} {
-      // Anyone holding the link can read; nobody can enumerate groups.
-      allow get: if true;
+      allow get: if isMember(gid);
       allow list: if false;
 
-      // Created in one batch together with its secret and the creator's organizer doc.
+      // Created in one batch with both secrets and the creator's organizer and member docs.
       allow create: if signedIn()
         && gid.size() >= 16
         && request.resource.data.keys().hasOnly(['name', 'avoidSameHousehold', 'assignments', 'drawnAt', 'createdAt'])
@@ -73,7 +80,8 @@ service cloud.firestore {
         && request.resource.data.assignments == null
         && request.resource.data.drawnAt == null
         && request.resource.data.createdAt == request.time
-        && existsAfter(secretPath(gid))
+        && existsAfter(secretPath(gid, 'admin'))
+        && existsAfter(secretPath(gid, 'family'))
         && existsAfter(organizerPath(gid));
 
       allow update: if isOrganizer(gid)
@@ -85,18 +93,20 @@ service cloud.firestore {
 
       allow delete: if false;
 
-      match /secret/{docId} {
-        // Only organizers can read it, so they can copy the organizer link later.
+      match /secret/{name} {
         allow get: if isOrganizer(gid);
         allow list: if false;
+        // Only while the group itself is being created in the same batch.
         allow create: if signedIn()
-          && docId == 'admin'
+          && (name == 'admin' || name == 'family')
           && !exists(groupPath(gid))
           && existsAfter(groupPath(gid))
-          && request.resource.data.keys().hasOnly(['key'])
-          && request.resource.data.key is string
-          && request.resource.data.key.size() >= 24;
-        allow update, delete: if false;
+          && validKey(request.resource.data, name == 'admin' ? 24 : 8);
+        // The organizer can change the family password.
+        allow update: if isOrganizer(gid)
+          && name == 'family'
+          && validKey(request.resource.data, 8);
+        allow delete: if false;
       }
 
       match /organizers/{uid} {
@@ -105,53 +115,32 @@ service cloud.firestore {
         allow create: if signedIn()
           && request.auth.uid == uid
           && request.resource.data.keys().hasOnly(['key'])
-          && request.resource.data.key == getAfter(secretPath(gid)).data.key;
+          && request.resource.data.key == getAfter(secretPath(gid, 'admin')).data.key;
         allow update, delete: if false;
       }
 
-      // Same pattern as organizers: each person has a secret edit key, and
-      // opening their edit link registers that browser in people/{pid}/editors.
-      match /people/{pid} {
-        allow read: if true;
-
-        // Created in one batch together with its secret and the creator's editor doc.
+      match /members/{uid} {
+        allow get: if signedIn() && request.auth.uid == uid;
+        allow list: if false;
         allow create: if signedIn()
-          && exists(groupPath(gid))
-          && validPerson(request.resource.data)
-          && request.resource.data.createdAt == request.time
-          && existsAfter(personSecretPath(gid, pid))
-          && existsAfter(editorPath(gid, pid));
+          && request.auth.uid == uid
+          && request.resource.data.keys().hasOnly(['key'])
+          && request.resource.data.key == getAfter(secretPath(gid, 'family')).data.key;
+        allow update, delete: if false;
+      }
 
-        allow update: if canEditPerson(gid, pid)
+      match /people/{pid} {
+        allow read: if isMember(gid);
+
+        allow create: if isMember(gid)
+          && validPerson(request.resource.data)
+          && request.resource.data.createdAt == request.time;
+
+        allow update: if isMember(gid)
           && validPerson(request.resource.data)
           && request.resource.data.createdAt == resource.data.createdAt;
 
-        // Leaves the secret and editor docs behind; they're tiny and unreadable.
-        allow delete: if canEditPerson(gid, pid);
-
-        match /secret/{docId} {
-          // The organizer can read it to re-send someone their edit link.
-          allow get: if isOrganizer(gid);
-          allow list: if false;
-          allow create: if signedIn()
-            && docId == 'edit'
-            && !exists(/databases/$(database)/documents/groups/$(gid)/people/$(pid))
-            && existsAfter(/databases/$(database)/documents/groups/$(gid)/people/$(pid))
-            && request.resource.data.keys().hasOnly(['key'])
-            && request.resource.data.key is string
-            && request.resource.data.key.size() >= 24;
-          allow update, delete: if false;
-        }
-
-        match /editors/{uid} {
-          allow get: if signedIn() && request.auth.uid == uid;
-          allow list: if false;
-          allow create: if signedIn()
-            && request.auth.uid == uid
-            && request.resource.data.keys().hasOnly(['key'])
-            && request.resource.data.key == getAfter(personSecretPath(gid, pid)).data.key;
-          allow update, delete: if false;
-        }
+        allow delete: if isMember(gid);
       }
     }
   }

@@ -3,13 +3,13 @@
 One-time setup, about 10 minutes. Everything stays on Firebase's free **Spark** plan;
 don't add a billing account and there's nothing that can ever charge you.
 
-Nobody needs an account or password. Access works through links:
+Nobody needs an account. Access works like this:
 
-- **Family link** (`?g=…`): see all wishlists and add yourself.
-- **Edit link** (`?g=…&edit=…`): everyone gets one when they add themselves. Opening it
-  on any device lets that device edit their wishlist.
+- **Family link + password**: you send both (the page can copy a ready-made invite
+  message). Each person enters the password once per device. After that they can see
+  and edit every wishlist. Firebase checks the password, not just the page.
 - **Organizer link** (`?g=…&admin=…`): you get it when you create the exchange. Opening it
-  on any device lets that device draw names, edit anyone's wishlist, and re-send edit links.
+  on any device lets that device draw names, see or change the password, and copy invites.
 
 ## 1. Create the project
 
@@ -63,6 +63,7 @@ the page loads `firebase-config.js` as a module).
 ## 7. Publish and use it
 
 1. Commit and push. The page will be at <https://cardboard-q.github.io/spinspinner/gifts/>.
-2. Create an exchange. Click **🔑 Copy my organizer link** and save it somewhere safe.
-3. Click **📋 Copy link** and send the family link to everyone.
-4. Once everyone has joined, click **Draw names**.
+2. Create an exchange (it suggests a password; change it if you like).
+3. Click **🔑 Copy my organizer link** and save it somewhere safe.
+4. Click **✉️ Copy invite message** and paste it into an email or text to the family.
+5. Once everyone has joined, click **Draw names**.

@@ -188,7 +188,12 @@ import {
 const CARD_COLORS = ["#d94848", "#2f9e62", "#3aa0ff", "#e8a21a", "#8b6cff", "#e0679a", "#17a2a2", "#f07a3a"];
 const MAX_ITEMS = 20;
 const GROUPS_KEY = "gifts.groups";
-const EDIT_KEYS = "gifts.editKeys";
+const MIN_PASSWORD = 8;
+const PASS_WORDS = [
+  "jolly", "cozy", "merry", "snowy", "sparkly", "frosty", "happy", "sleepy", "giggly", "toasty",
+  "pinecone", "reindeer", "cocoa", "mitten", "snowman", "cookie", "candle", "sleigh", "penguin", "pajama",
+  "ribbon", "lantern", "muffin", "walrus", "blanket", "cupcake", "otter", "teapot", "pretzel", "acorn",
+];
 
 const app = document.getElementById("app");
 const subtitle = document.getElementById("subtitle");
@@ -197,9 +202,8 @@ const toastEl = document.getElementById("toast");
 const params = new URLSearchParams(location.search);
 const gid = params.get("g");
 const adminParam = params.get("admin");
-const editParam = params.get("edit");
-// Keep secret keys out of the address bar so they don't get copied or screen-shared by accident.
-if (gid && (adminParam || editParam)) history.replaceState(null, "", `${location.pathname}?g=${encodeURIComponent(gid)}`);
+// Keep the organizer key out of the address bar so it doesn't get copied or screen-shared by accident.
+if (gid && adminParam) history.replaceState(null, "", `${location.pathname}?g=${encodeURIComponent(gid)}`);
 
 const state = {
   user: null,
@@ -208,9 +212,7 @@ const state = {
   editingId: null,
   loadError: null,
   isOrganizer: false,
-  editable: new Set(),
-  checked: new Set(),
-  justAdded: null,
+  access: "checking", // "checking" | "locked" | "member"
 };
 
 function loadStore(key) {
@@ -223,9 +225,6 @@ function rememberGroup(id, patch) {
   const all = loadStore(GROUPS_KEY);
   all[id] = { ...all[id], ...patch };
   saveStore(GROUPS_KEY, all);
-}
-function rememberEditKey(pid, key) {
-  saveStore(EDIT_KEYS, { ...loadStore(EDIT_KEYS), [pid]: key });
 }
 
 // ---------- tiny DOM helper ----------
@@ -279,16 +278,22 @@ function safeUrl(raw) {
 }
 
 const norm = s => (s || "").trim().toLowerCase();
+// Passwords are case-insensitive so nobody gets tripped up by autocapitalizing phones.
+const normPassword = norm;
+
+function randomPassword() {
+  const [a, b, c] = crypto.getRandomValues(new Uint32Array(3));
+  return `${PASS_WORDS[a % PASS_WORDS.length]}-${PASS_WORDS[b % PASS_WORDS.length]}-${10 + (c % 90)}`;
+}
 const shareLink = () => `${location.origin}${location.pathname}?g=${encodeURIComponent(gid)}`;
 const organizerLink = key => `${shareLink()}&admin=${encodeURIComponent(key)}`;
-const editLink = (pid, key) => `${shareLink()}&edit=${encodeURIComponent(pid + "." + key)}`;
 
 async function copyText(text, msg) {
   try {
     await navigator.clipboard.writeText(text);
     toast(msg);
   } catch {
-    prompt("Copy this link:", text);
+    prompt("Copy this:", text);
   }
 }
 
@@ -313,17 +318,24 @@ onAuthStateChanged(auth, async user => {
   state.user = user;
   if (gid) {
     await claimOrganizer();
-    await claimEdit();
-    refreshEditable();
+    if (state.isOrganizer || await isMember()) {
+      state.access = "member";
+      startListening();
+    } else {
+      state.access = "locked";
+    }
   }
   render();
 });
 
-if (gid) {
+let listening = false;
+function startListening() {
+  if (listening) return;
+  listening = true;
   onSnapshot(doc(db, "groups", gid),
     snap => {
       state.group = snap.exists() ? snap.data() : null;
-      if (state.group && state.isOrganizer) rememberGroup(gid, { name: state.group.name });
+      if (state.group) rememberGroup(gid, { name: state.group.name });
       render();
     },
     err => { state.loadError = friendlyError(err); render(); });
@@ -333,7 +345,6 @@ if (gid) {
         .map(d => ({ id: d.id, ...d.data() }))
         .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
       render();
-      refreshEditable();
     },
     err => { state.loadError = friendlyError(err); render(); });
 }
@@ -355,39 +366,30 @@ async function claimOrganizer() {
   }
 }
 
-async function claimEdit() {
-  if (!editParam) return;
-  const [pid, key] = editParam.split(".");
-  if (!pid || !key) return;
-  const ref = doc(db, "groups", gid, "people", pid, "editors", state.user.uid);
+async function isMember() {
   try {
-    if (!(await getDoc(ref)).exists()) await setDoc(ref, { key });
-    state.editable.add(pid);
-    state.checked.add(pid);
-    rememberEditKey(pid, key);
-    toast("You can edit this wishlist on this device now. ✏️");
-  } catch (err) {
-    toast("That edit link didn't work.", true);
+    return (await getDoc(doc(db, "groups", gid, "members", state.user.uid))).exists();
+  } catch {
+    return false;
   }
 }
 
-async function refreshEditable() {
-  if (!state.user || !gid) return;
-  const todo = state.people.filter(p => !state.checked.has(p.id));
-  if (!todo.length) return;
-  todo.forEach(p => state.checked.add(p.id));
-  const results = await Promise.all(todo.map(p =>
-    getDoc(doc(db, "groups", gid, "people", p.id, "editors", state.user.uid))
-      .then(snap => snap.exists(), () => false)));
-  let changed = false;
-  todo.forEach((p, i) => {
-    if (results[i]) { state.editable.add(p.id); changed = true; }
-  });
-  if (changed) render();
+async function unlock(password) {
+  try {
+    await setDoc(doc(db, "groups", gid, "members", state.user.uid), { key: normPassword(password) });
+  } catch (err) {
+    toast("That password didn't work. Check the link and password from your invite.", true);
+    return false;
+  }
+  state.access = "member";
+  startListening();
+  render();
+  toast("Unlocked! 🎁");
+  return true;
 }
 
 // ---------- permissions (mirrors firestore.rules) ----------
-const canEdit = p => state.isOrganizer || state.editable.has(p.id);
+const canEdit = () => state.access === "member";
 
 // ---------- drawing names ----------
 function shuffle(a) {
@@ -447,9 +449,10 @@ function drawIsStale() {
 }
 
 // ---------- actions ----------
-async function createGroup(name) {
+async function createGroup(name, password) {
   const id = randomId();
   const key = randomId(32);
+  const pw = normPassword(password);
   const batch = writeBatch(db);
   batch.set(doc(db, "groups", id), {
     name,
@@ -459,54 +462,45 @@ async function createGroup(name) {
     createdAt: serverTimestamp(),
   });
   batch.set(doc(db, "groups", id, "secret", "admin"), { key });
+  batch.set(doc(db, "groups", id, "secret", "family"), { key: pw });
   batch.set(doc(db, "groups", id, "organizers", state.user.uid), { key });
+  batch.set(doc(db, "groups", id, "members", state.user.uid), { key: pw });
   try {
     await batch.commit();
     rememberGroup(id, { name, adminKey: key });
     location.href = `${location.pathname}?g=${id}`;
   } catch (err) {
     toast(friendlyError(err), true);
+    return false;
   }
+  return true;
 }
 
 async function savePerson(id, data) {
   const payload = { ...data, updatedAt: serverTimestamp() };
   if (id) return updateDoc(doc(db, "groups", gid, "people", id), payload);
-
-  const ref = doc(collection(db, "groups", gid, "people"));
-  const key = randomId(32);
-  const batch = writeBatch(db);
-  batch.set(ref, { ...payload, createdAt: serverTimestamp() });
-  batch.set(doc(ref, "secret", "edit"), { key });
-  batch.set(doc(ref, "editors", state.user.uid), { key });
-  state.editable.add(ref.id);
-  state.checked.add(ref.id);
-  try {
-    await batch.commit();
-  } catch (err) {
-    state.editable.delete(ref.id);
-    throw err;
-  }
-  rememberEditKey(ref.id, key);
-  state.justAdded = { pid: ref.id, name: data.name, key };
+  await setDoc(doc(collection(db, "groups", gid, "people")), { ...payload, createdAt: serverTimestamp() });
 }
 
-async function personEditKey(p) {
-  const local = loadStore(EDIT_KEYS)[p.id];
-  if (local) return local;
-  if (!state.isOrganizer) return null;
+async function familyPassword() {
   try {
-    const snap = await getDoc(doc(db, "groups", gid, "people", p.id, "secret", "edit"));
-    return snap.data()?.key || null;
+    return (await getDoc(doc(db, "groups", gid, "secret", "family"))).data()?.key || null;
   } catch {
     return null;
   }
 }
 
-async function copyEditLink(p) {
-  const key = await personEditKey(p);
-  if (!key) return toast("Couldn't find this person's edit link.", true);
-  copyText(editLink(p.id, key), `Copied ${p.name}'s edit link. Send it only to them.`);
+async function changePassword() {
+  const next = prompt(`New family password (at least ${MIN_PASSWORD} characters). Devices that already unlocked stay unlocked.`, randomPassword());
+  if (next == null) return;
+  if (normPassword(next).length < MIN_PASSWORD) return toast(`Passwords need at least ${MIN_PASSWORD} characters.`, true);
+  try {
+    await setDoc(doc(db, "groups", gid, "secret", "family"), { key: normPassword(next) });
+    toast("Password changed.");
+    render();
+  } catch (err) {
+    toast(friendlyError(err), true);
+  }
 }
 
 async function organizerKey() {
@@ -573,6 +567,8 @@ function render() {
   const typing = form && form.contains(active);
 
   if (!gid) return renderLanding();
+  if (state.access === "checking") return;
+  if (state.access === "locked") return renderLocked();
   if (state.loadError) return app.replaceChildren(h("div", { class: "banner error" }, state.loadError));
   if (state.group === undefined) return;
   if (state.group === null) {
@@ -586,9 +582,9 @@ function render() {
   subtitle.textContent = state.group.name;
   document.title = `${state.group.name} · Gift Exchange`;
 
-  const sections = [shareView()];
-  if (state.justAdded) sections.push(justAddedView());
+  const sections = [];
   if (state.isOrganizer) sections.push(organizerView());
+  else sections.push(shareView());
   if (state.group.assignments && !drawIsStale()) sections.push(pairsView());
 
   if (typing) {
@@ -601,24 +597,59 @@ function render() {
   app.replaceChildren(...sections, personFormView(), peopleView());
 }
 
+function renderLocked() {
+  subtitle.textContent = "";
+  const pwInput = h("input", {
+    type: "text", placeholder: "Family password", required: true,
+    autocomplete: "off", autocapitalize: "none", spellcheck: false,
+  });
+  const btn = h("button", { class: "btn", type: "submit" }, "🔓 Unlock");
+  app.replaceChildren(h("div", { class: "panel center" },
+    h("h2", {}, "🔒 This gift exchange is locked"),
+    h("p", { class: "hint" }, "Enter the family password from your invite. You only need to do this once on each device."),
+    h("form", {
+      class: "row",
+      style: "justify-content:center",
+      onsubmit: async e => {
+        e.preventDefault();
+        if (!pwInput.value.trim()) return;
+        btn.disabled = true;
+        if (!await unlock(pwInput.value)) btn.disabled = false;
+      },
+    }, pwInput, btn),
+  ));
+  pwInput.focus();
+}
+
 function renderLanding() {
   subtitle.textContent = "";
   const nameInput = h("input", { type: "text", maxLength: 60, placeholder: "e.g. Family Christmas 2026", required: true });
+  const pwInput = h("input", { type: "text", maxLength: 60, required: true, value: randomPassword(), autocomplete: "off", spellcheck: false });
   const createBtn = h("button", { class: "btn", type: "submit", disabled: !state.user }, "Create");
   const createForm = h("form", {
-    class: "row",
-    onsubmit: e => {
+    style: "display:flex;flex-direction:column;gap:12px",
+    onsubmit: async e => {
       e.preventDefault();
       const n = nameInput.value.trim();
-      if (n && state.user) { createBtn.disabled = true; createGroup(n); }
+      const pw = pwInput.value.trim();
+      if (!n || !state.user) return;
+      if (pw.length < MIN_PASSWORD) return toast(`Passwords need at least ${MIN_PASSWORD} characters.`, true);
+      createBtn.disabled = true;
+      if (!await createGroup(n, pw)) createBtn.disabled = false;
     },
-  }, nameInput, createBtn);
+  },
+    h("label", { class: "field" }, "Name", nameInput),
+    h("label", { class: "field" },
+      h("span", {}, "Family password ", h("span", { class: "opt" }, "(we made one up, change it if you like)")),
+      pwInput),
+    h("div", { class: "row" }, createBtn),
+  );
 
   const mine = Object.entries(loadStore(GROUPS_KEY));
   app.replaceChildren(
     h("div", { class: "panel" },
       h("h2", {}, "Start a new gift exchange"),
-      h("p", { class: "hint" }, "You'll get a link to send the family, plus a private organizer link for you."),
+      h("p", { class: "hint" }, "You'll get a link and password to send the family, plus a private organizer link for you."),
       createForm),
     mine.length && h("div", { class: "panel" },
       h("h2", {}, "Exchanges on this device"),
@@ -631,43 +662,51 @@ function renderLanding() {
 function shareView() {
   const link = shareLink();
   return h("div", { class: "panel" },
-    h("h2", {}, "Invite your family"),
-    h("p", { class: "hint" }, "Anyone with this link can see the wishlists and add themselves. Only share it with family."),
+    h("h2", {}, "Invite family"),
+    h("p", { class: "hint" }, "Send this link. They'll also need the family password."),
     h("div", { class: "share" },
       h("code", {}, link),
-      h("button", {
-        class: "btn secondary",
-        onclick: async () => {
-          try { await navigator.clipboard.writeText(link); toast("Link copied!"); }
-          catch { toast("Couldn't copy. Select the link and copy it instead.", true); }
-        },
-      }, "📋 Copy link"),
+      h("button", { class: "btn secondary", onclick: () => copyText(link, "Link copied!") }, "📋 Copy link"),
     ),
   );
 }
 
-function justAddedView() {
-  const { pid, name, key } = state.justAdded;
-  const link = editLink(pid, key);
-  return h("div", { class: "panel", style: "border: 3px solid var(--green)" },
-    h("h2", {}, `🎉 ${name} is in! Save this edit link`),
-    h("p", { class: "hint" }, "This device can already edit the wishlist. To edit from another phone or computer later, open this link there. Text or email it to yourself, or bookmark it. Don't share it with anyone else."),
-    h("div", { class: "share" },
-      h("code", {}, link),
-      h("button", { class: "btn secondary", onclick: () => copyText(link, "Edit link copied!") }, "📋 Copy"),
-    ),
-    h("div", { class: "row" },
-      h("button", { class: "btn secondary small", onclick: () => { state.justAdded = null; render(); } }, "Got it"),
-    ),
-  );
+function inviteMessage(password) {
+  return `You're invited to our gift exchange: ${state.group.name}! 🎁\n\n` +
+    `1. Open ${shareLink()}\n` +
+    `2. Enter the family password: ${password}\n` +
+    `3. Add yourself (and your kids) with a wishlist.\n\n` +
+    `Everyone in the family can see and edit the wishlists.`;
 }
 
 function organizerView() {
   const g = state.group;
   const drawn = !!g.assignments;
   const stale = drawIsStale();
+  const pwCode = h("code", {}, "••••••••");
+  familyPassword().then(pw => { if (pw) pwCode.textContent = pw; });
   return h("div", { class: "panel" },
     h("h2", {}, "Organizer tools"),
+    h("div", { class: "field" }, "Invite the family"),
+    h("div", { class: "share" },
+      h("code", {}, shareLink()),
+      h("button", { class: "btn secondary", onclick: () => copyText(shareLink(), "Link copied!") }, "📋 Link"),
+    ),
+    h("div", { class: "share" },
+      pwCode,
+      h("button", { class: "btn secondary", onclick: changePassword }, "Change"),
+    ),
+    h("div", { class: "row" },
+      h("button", {
+        class: "btn",
+        onclick: async () => {
+          const pw = await familyPassword();
+          if (!pw) return toast("Couldn't load the password.", true);
+          copyText(inviteMessage(pw), "Invite copied! Paste it into an email or text.");
+        },
+      }, "✉️ Copy invite message"),
+    ),
+    h("div", { class: "field" }, "Drawing names"),
     h("label", { class: "row" },
       h("input", {
         type: "checkbox",
@@ -693,7 +732,7 @@ function organizerView() {
         },
       }, "🔑 Copy my organizer link"),
     ),
-    h("p", { class: "hint" }, "Open your organizer link on another device to manage this exchange there. Anyone with it can draw names and edit any wishlist, so keep it to yourself. Use the 🔗 button on someone's card to re-send them their edit link."),
+    h("p", { class: "hint" }, "Open your organizer link on another device to manage this exchange there. Anyone with it can draw names, so keep it to yourself."),
   );
 }
 
@@ -803,14 +842,12 @@ function peopleView() {
               : item.text);
           }))
         : h("p", { class: "none" }, "No wishes yet."),
-      canEdit(p) && h("div", { class: "actions" },
+      canEdit() && h("div", { class: "actions" },
         h("button", {
           class: "btn secondary small",
           onclick: () => { state.editingId = p.id; render(); document.getElementById("personFormPanel").scrollIntoView({ behavior: "smooth" }); },
         }, "✏️ Edit"),
         h("button", { class: "btn secondary small", onclick: () => removePerson(p) }, "🗑 Remove"),
-        (state.isOrganizer || loadStore(EDIT_KEYS)[p.id]) &&
-          h("button", { class: "btn secondary small", title: "Copy edit link", onclick: () => copyEditLink(p) }, "🔗"),
       ),
     );
   }));
