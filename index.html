@@ -188,6 +188,57 @@
   .groups { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
   .groups a { color: var(--blue); }
 
+  .elf-scene {
+    position: relative;
+    border-radius: var(--radius);
+    overflow: hidden;
+    padding: 28px 12px 18px;
+    background:
+      radial-gradient(2px 2px at 12% 18%, #fff 50%, transparent 51%),
+      radial-gradient(1.5px 1.5px at 30% 8%, #fff 50%, transparent 51%),
+      radial-gradient(2px 2px at 48% 22%, #fff 50%, transparent 51%),
+      radial-gradient(1.5px 1.5px at 66% 12%, #fff 50%, transparent 51%),
+      radial-gradient(2.5px 2.5px at 82% 26%, #fff 50%, transparent 51%),
+      radial-gradient(1.5px 1.5px at 92% 6%, #fff 50%, transparent 51%),
+      radial-gradient(2px 2px at 6% 40%, #fff 50%, transparent 51%),
+      radial-gradient(1.5px 1.5px at 58% 38%, #fff 50%, transparent 51%),
+      linear-gradient(180deg, #2a2f6e 0%, #4b56a8 55%, #8c97d6 100%);
+  }
+  .elf-scene::after {
+    content: "";
+    position: absolute; left: -10%; right: -10%; bottom: -60px; height: 140px;
+    background: #f4f8ff;
+    border-radius: 50% 50% 0 0;
+    z-index: 0;
+  }
+  .elf-scene h2 { color: #fff; text-align: center; margin: 0 0 8px; position: relative; z-index: 1; }
+  .elves {
+    position: relative; z-index: 1;
+    display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 6px;
+  }
+  .elf {
+    width: 112px;
+    display: flex; flex-direction: column; align-items: center;
+    cursor: pointer; background: none; border: none; padding: 0; font: inherit;
+  }
+  .elf { padding-top: 14px; }
+  .elf svg { width: 112px; height: 187px; overflow: visible; }
+  .elf .dancer { animation: elf-dance 1.6s ease-in-out infinite; transform-origin: 50% 100%; }
+  .elf:nth-child(even) .dancer { animation-direction: reverse; }
+  .elf .elf-name {
+    margin-top: -4px;
+    background: rgba(255,255,255,0.92); color: var(--ink);
+    border-radius: 999px; padding: 2px 10px; font-size: 0.85rem; font-weight: bold;
+    max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  @keyframes elf-dance {
+    0%, 100% { transform: translateY(0) rotate(-4deg); }
+    25% { transform: translateY(-8px) rotate(0deg); }
+    50% { transform: translateY(0) rotate(4deg); }
+    75% { transform: translateY(-5px) rotate(0deg); }
+  }
+  @media (prefers-reduced-motion: reduce) { .elf .dancer { animation: none; } }
+
   #toast {
     position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(20px);
     background: var(--ink); color: #fff; padding: 10px 16px; border-radius: 10px;
@@ -653,6 +704,80 @@ async function resizePhoto(file) {
   throw new Error("image too large");
 }
 
+// ---------- elves ----------
+const ELF_OUTFITS = [
+  { name: "Classic",     hat: "#2e9e4f", trim: "#ffffff", pom: "#f5d142", tunic: "#2e9e4f", collar: "#d94848", belt: "#3b2a1a", buckle: "#f5c542", legA: "#d94848", legB: "#ffffff", shoe: "#2e9e4f", bell: true },
+  { name: "Candy Cane",  hat: "#d94848", trim: "#ffffff", pom: "#ffffff", tunic: "#d94848", collar: "#ffffff", belt: "#222222", buckle: "#f5c542", legA: "#ffffff", legB: "#d94848", shoe: "#d94848", bell: false },
+  { name: "Frosty",      hat: "#3a7bd5", trim: "#e8f4ff", pom: "#cfe8ff", tunic: "#5aa0e8", collar: "#e8f4ff", belt: "#1d3d6b", buckle: "#d9e6f2", legA: "#e8f4ff", legB: "#3a7bd5", shoe: "#1d3d6b", bell: false },
+  { name: "Royal",       hat: "#7b4fe0", trim: "#f5c542", pom: "#f5c542", tunic: "#8b6cff", collar: "#f5c542", belt: "#3a2470", buckle: "#f5c542", legA: "#f5c542", legB: "#7b4fe0", shoe: "#3a2470", bell: true },
+  { name: "Gingerbread", hat: "#b5651d", trim: "#ffffff", pom: "#e94b6a", tunic: "#c97a3a", collar: "#ffffff", belt: "#6b3b14", buckle: "#e94b6a", legA: "#ffffff", legB: "#b5651d", shoe: "#6b3b14", bell: false },
+  { name: "Peppermint",  hat: "#f27fb0", trim: "#ffffff", pom: "#7fe3c4", tunic: "#5fd1ae", collar: "#f27fb0", belt: "#2b6b5a", buckle: "#ffffff", legA: "#f27fb0", legB: "#ffffff", shoe: "#2b6b5a", bell: true },
+  { name: "Golden Star", hat: "#e8b923", trim: "#ffffff", pom: "#fff6c0", tunic: "#1f5f3a", collar: "#e8b923", belt: "#e8b923", buckle: "#1f5f3a", legA: "#e8b923", legB: "#1f5f3a", shoe: "#8a6a10", bell: true },
+  { name: "Midnight",    hat: "#2b2140", trim: "#9fb4ff", pom: "#9fb4ff", tunic: "#3d2f63", collar: "#9fb4ff", belt: "#111111", buckle: "#c0c8ff", legA: "#9fb4ff", legB: "#2b2140", shoe: "#111111", bell: false },
+];
+
+// Only constant colors and numbers go into this markup; the face photo and
+// initial are attached afterwards through DOM properties.
+function elfSvg(o, i) {
+  const flip = i % 2 === 1;
+  const tipX = flip ? 20 : 100;
+  const curl = flip ? `Q4 -10 14 -4` : `Q116 -10 106 -4`;
+  const id = `elf${i}`;
+  const ornament = o.bell
+    ? `<circle cx="${flip ? 14 : 106}" cy="-3" r="6" fill="${o.pom}" stroke="#00000033"/><circle cx="${flip ? 14 : 106}" cy="-1" r="1.6" fill="#00000055"/>`
+    : `<circle cx="${flip ? 14 : 106}" cy="-4" r="8" fill="${o.pom}"/>`;
+  return `
+<svg viewBox="0 0 120 200" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <defs>
+    <pattern id="${id}-legs" width="10" height="8" patternUnits="userSpaceOnUse">
+      <rect width="10" height="8" fill="${o.legA}"/><rect y="4" width="10" height="4" fill="${o.legB}"/>
+    </pattern>
+    <clipPath id="${id}-face"><circle cx="60" cy="66" r="27"/></clipPath>
+  </defs>
+  <ellipse cx="60" cy="194" rx="34" ry="5" fill="#00000026"/>
+  <g class="dancer">
+    <rect x="44" y="140" width="12" height="38" rx="5" fill="url(#${id}-legs)"/>
+    <rect x="64" y="140" width="12" height="38" rx="5" fill="url(#${id}-legs)"/>
+    <path d="M58 180 L36 180 Q18 180 16 164 Q24 172 34 170 L58 168 Z" fill="${o.shoe}"/>
+    <path d="M62 180 L84 180 Q102 180 104 164 Q96 172 86 170 L62 168 Z" fill="${o.shoe}"/>
+    <circle cx="16" cy="163" r="2.5" fill="${o.pom}"/>
+    <circle cx="104" cy="163" r="2.5" fill="${o.pom}"/>
+    <path d="M30 104 Q20 122 24 140" stroke="${o.tunic}" stroke-width="11" stroke-linecap="round" fill="none"/>
+    <path d="M90 104 Q100 122 96 140" stroke="${o.tunic}" stroke-width="11" stroke-linecap="round" fill="none"/>
+    <circle cx="24" cy="142" r="6.5" fill="#ffffff" stroke="#00000022"/>
+    <circle cx="96" cy="142" r="6.5" fill="#ffffff" stroke="#00000022"/>
+    <path d="M40 98 L80 98 L90 140 L82 146 L74 140 L66 146 L60 140 L54 146 L46 140 L38 146 L30 140 Z" fill="${o.tunic}"/>
+    <rect x="34" y="120" width="52" height="8" fill="${o.belt}"/>
+    <rect x="55" y="118.5" width="10" height="11" rx="1.5" fill="none" stroke="${o.buckle}" stroke-width="2.5"/>
+    <circle cx="60" cy="110" r="2" fill="${o.buckle}"/>
+    <path d="M38 94 L82 94 L86 102 L77 99 L70 106 L64 99 L60 106 L56 99 L50 106 L43 99 L34 102 Z" fill="${o.collar}"/>
+    <circle class="face-bg" cx="60" cy="66" r="27"/>
+    <text class="face-initial" x="60" y="67" text-anchor="middle" dominant-baseline="central" font-size="26" font-weight="bold" fill="#ffffff" font-family="Trebuchet MS, sans-serif"></text>
+    <image class="face-photo" x="33" y="39" width="54" height="54" clip-path="url(#${id}-face)" preserveAspectRatio="xMidYMid slice"/>
+    <circle cx="60" cy="66" r="27" fill="none" stroke="#ffffff" stroke-width="2"/>
+    <path d="M30 46 Q34 14 ${tipX} -6 ${curl} Q${flip ? 44 : 76} 22 90 46 Z" fill="${o.hat}"/>
+    <path d="M26 47 Q60 34 94 47 L94 53 Q60 41 26 53 Z" fill="${o.trim}"/>
+    ${ornament}
+  </g>
+</svg>`;
+}
+
+function elfView() {
+  return h("div", { class: "elf-scene" },
+    h("h2", {}, "🎄 The Elf Crew 🎄"),
+    h("div", { class: "elves" }, state.people.map((p, i) => {
+      const btn = h("button", { class: "elf", type: "button", title: `See ${p.name}'s wishlist`, onclick: () => jumpTo(p.id) });
+      btn.innerHTML = elfSvg(ELF_OUTFITS[i % ELF_OUTFITS.length], i);
+      btn.querySelector(".dancer").style.animationDelay = `${-(i * 0.23) % 1.6}s`;
+      btn.querySelector(".face-bg").setAttribute("fill", personColor(p));
+      if (isPhoto(p.photo)) btn.querySelector(".face-photo").setAttribute("href", p.photo);
+      else btn.querySelector(".face-initial").textContent = (p.name || "?").trim().charAt(0).toUpperCase();
+      btn.append(h("span", { class: "elf-name" }, p.name));
+      return btn;
+    })),
+  );
+}
+
 function jumpTo(id) {
   const el = document.getElementById("p-" + id);
   if (!el) return;
@@ -689,6 +814,7 @@ function render() {
   if (state.isOrganizer) sections.push(organizerView());
   else sections.push(shareView());
   if (state.group.assignments && !drawIsStale()) sections.push(pairsView());
+  if (state.people.length) sections.push(elfView());
 
   if (typing) {
     for (const el of [...app.children]) if (el.id !== "personFormPanel") el.remove();
