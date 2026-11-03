@@ -240,6 +240,15 @@
   }
   @media (prefers-reduced-motion: reduce) { .elf .dancer { animation: none; } }
 
+  .crop-card { gap: 14px; }
+  .crop-canvas {
+    width: var(--crop-size); height: var(--crop-size);
+    border-radius: 16px; background: #2b2140;
+    touch-action: none; cursor: grab; display: block;
+  }
+  .crop-canvas.dragging { cursor: grabbing; }
+  .zoom-row { display: flex; align-items: center; gap: 10px; width: 100%; }
+  .zoom-row input { flex: 1; accent-color: var(--green); }
   .peek-backdrop {
     position: fixed; inset: 0; z-index: 20;
     background: rgba(43, 33, 64, 0.6);
@@ -743,24 +752,158 @@ function avatar(p, small = false) {
 }
 
 // Center-crops to a square and shrinks it so it fits comfortably in a Firestore document.
-async function resizePhoto(file) {
-  const img = await new Promise((resolve, reject) => {
+function loadImage(file) {
+  return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
     const el = new Image();
     el.onload = () => { URL.revokeObjectURL(url); resolve(el); };
     el.onerror = () => { URL.revokeObjectURL(url); reject(new Error("unreadable image")); };
     el.src = url;
   });
-  const side = Math.min(img.naturalWidth, img.naturalHeight);
+}
+
+// Shrinks the chosen square of the image so it fits comfortably in a Firestore document.
+function exportPhoto(img, sx, sy, side) {
   const canvas = document.createElement("canvas");
   canvas.width = canvas.height = PHOTO_SIZE;
   const ctx = canvas.getContext("2d");
-  ctx.drawImage(img, (img.naturalWidth - side) / 2, (img.naturalHeight - side) / 2, side, side, 0, 0, PHOTO_SIZE, PHOTO_SIZE);
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(img, sx, sy, side, side, 0, 0, PHOTO_SIZE, PHOTO_SIZE);
   for (const q of [0.82, 0.7, 0.55, 0.4]) {
     const data = canvas.toDataURL("image/jpeg", q);
     if (data.length <= MAX_PHOTO_CHARS) return data;
   }
   throw new Error("image too large");
+}
+
+// Opens a crop window; resolves with the cropped photo, or null if cancelled.
+function cropPhoto(img) {
+  return new Promise(resolve => {
+    const V = Math.min(300, innerWidth - 80);
+    const iw = img.naturalWidth, ih = img.naturalHeight;
+    const minScale = Math.max(V / iw, V / ih);
+    const MAX_ZOOM = 5;
+    let scale = minScale;
+    let ox = (V - iw * scale) / 2, oy = (V - ih * scale) / 2;
+
+    const dpr = devicePixelRatio || 1;
+    const canvas = h("canvas", { class: "crop-canvas", style: `--crop-size:${V}px`, "aria-label": "Drag to move your photo" });
+    canvas.width = canvas.height = Math.round(V * dpr);
+    const ctx = canvas.getContext("2d");
+    ctx.scale(dpr, dpr);
+
+    const clamp = () => {
+      ox = Math.min(0, Math.max(V - iw * scale, ox));
+      oy = Math.min(0, Math.max(V - ih * scale, oy));
+    };
+    function draw() {
+      ctx.clearRect(0, 0, V, V);
+      ctx.drawImage(img, ox, oy, iw * scale, ih * scale);
+      ctx.save();
+      ctx.fillStyle = "rgba(20, 14, 36, 0.55)";
+      ctx.beginPath();
+      ctx.rect(0, 0, V, V);
+      ctx.arc(V / 2, V / 2, V / 2 - 4, 0, Math.PI * 2);
+      ctx.fill("evenodd");
+      ctx.strokeStyle = "#fff";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(V / 2, V / 2, V / 2 - 4, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+    function zoomTo(next, cx = V / 2, cy = V / 2) {
+      next = Math.min(minScale * MAX_ZOOM, Math.max(minScale, next));
+      ox = cx - (cx - ox) * (next / scale);
+      oy = cy - (cy - oy) * (next / scale);
+      scale = next;
+      clamp();
+      slider.value = String(scale / minScale);
+      draw();
+    }
+
+    const slider = h("input", {
+      type: "range", min: "1", max: String(MAX_ZOOM), step: "0.01", value: "1", "aria-label": "Zoom",
+      oninput: () => zoomTo(minScale * Number(slider.value)),
+    });
+
+    // Pointer tracking handles both one-finger/mouse drags and two-finger pinches.
+    const pointers = new Map();
+    let pinch = null;
+    const local = e => {
+      const r = canvas.getBoundingClientRect();
+      return { x: e.clientX - r.left, y: e.clientY - r.top };
+    };
+    canvas.addEventListener("pointerdown", e => {
+      canvas.setPointerCapture(e.pointerId);
+      pointers.set(e.pointerId, local(e));
+      canvas.classList.add("dragging");
+      if (pointers.size === 2) {
+        const [a, b] = [...pointers.values()];
+        pinch = { dist: Math.hypot(a.x - b.x, a.y - b.y), scale };
+      }
+    });
+    canvas.addEventListener("pointermove", e => {
+      if (!pointers.has(e.pointerId)) return;
+      const prev = pointers.get(e.pointerId);
+      const cur = local(e);
+      pointers.set(e.pointerId, cur);
+      if (pointers.size === 2 && pinch) {
+        const [a, b] = [...pointers.values()];
+        zoomTo(pinch.scale * Math.hypot(a.x - b.x, a.y - b.y) / pinch.dist, (a.x + b.x) / 2, (a.y + b.y) / 2);
+      } else if (pointers.size === 1) {
+        ox += cur.x - prev.x;
+        oy += cur.y - prev.y;
+        clamp();
+        draw();
+      }
+    });
+    const release = e => {
+      pointers.delete(e.pointerId);
+      if (pointers.size < 2) pinch = null;
+      if (!pointers.size) canvas.classList.remove("dragging");
+    };
+    canvas.addEventListener("pointerup", release);
+    canvas.addEventListener("pointercancel", release);
+    canvas.addEventListener("wheel", e => {
+      e.preventDefault();
+      const p = local(e);
+      zoomTo(scale * Math.exp(-e.deltaY * 0.0015), p.x, p.y);
+    }, { passive: false });
+
+    function finish(result) {
+      document.removeEventListener("keydown", onKey);
+      backdrop.remove();
+      resolve(result);
+    }
+    const onKey = e => { if (e.key === "Escape") finish(null); };
+    document.addEventListener("keydown", onKey);
+
+    const useBtn = h("button", {
+      class: "btn",
+      onclick: () => {
+        try {
+          finish(exportPhoto(img, -ox / scale, -oy / scale, V / scale));
+        } catch {
+          toast("Couldn't use that picture. Try a different one.", true);
+        }
+      },
+    }, "✅ Use this photo");
+    const card = h("div", { class: "peek-card crop-card", role: "dialog", "aria-modal": "true", "aria-label": "Crop your photo" },
+      h("h2", { style: "margin:0" }, "Line up your face"),
+      h("p", { class: "label" }, "Drag to move. Zoom with the slider (or pinch / scroll)."),
+      canvas,
+      h("div", { class: "zoom-row" }, "➖", slider, "➕"),
+      h("div", { class: "row", style: "justify-content:center" },
+        useBtn,
+        h("button", { class: "btn secondary", onclick: () => finish(null) }, "Cancel"),
+      ),
+    );
+    const backdrop = h("div", { class: "peek-backdrop", onclick: e => { if (e.target === backdrop) finish(null); } }, card);
+    document.body.append(backdrop);
+    draw();
+    useBtn.focus();
+  });
 }
 
 // ---------- elves ----------
@@ -969,11 +1112,12 @@ function jumpTo(id) {
 }
 
 // ---------- views ----------
-function render() {
-  // Don't wipe a form someone is typing in when live updates arrive.
+// resetForm rebuilds the add/edit form; otherwise live updates keep a form that
+// has focus or unsaved changes (e.g. while the photo crop window is open).
+function render(resetForm = false) {
   const form = document.getElementById("personForm");
   const active = document.activeElement;
-  const typing = form && form.contains(active);
+  const typing = !resetForm && form && (form.contains(active) || form.dataset.dirty === "1");
 
   if (!gid) return renderLanding();
   if (state.access === "checking") return;
@@ -1226,16 +1370,24 @@ function personFormView() {
     preview.replaceChildren(avatar({ id: editing?.id || "new", name: nameInput.value || "?", photo }));
     removePhotoBtn.hidden = !photo;
   }
-  removePhotoBtn.addEventListener("click", () => { photo = ""; showPhoto(); });
+  const markDirty = () => { const f = document.getElementById("personForm"); if (f) f.dataset.dirty = "1"; };
+  removePhotoBtn.addEventListener("click", () => { photo = ""; markDirty(); showPhoto(); });
   fileInput.addEventListener("change", async () => {
     const file = fileInput.files[0];
     fileInput.value = "";
     if (!file) return;
+    markDirty();
+    let img;
     try {
-      photo = await resizePhoto(file);
-      showPhoto();
+      img = await loadImage(file);
     } catch {
-      toast("Couldn't use that picture. Try a JPG or PNG.", true);
+      return toast("Couldn't open that picture. Try a JPG or PNG.", true);
+    }
+    const cropped = await cropPhoto(img);
+    if (cropped) {
+      photo = cropped;
+      markDirty();
+      showPhoto();
     }
   });
   nameInput.addEventListener("input", () => { if (!photo) showPhoto(); });
@@ -1261,7 +1413,7 @@ function personFormView() {
       toast(editing ? "Saved!" : `${name} has joined! 🎁`);
       state.editingId = null;
       document.activeElement?.blur();
-      render();
+      render(true);
     } catch (err) {
       toast(friendlyError(err), true);
       saveBtn.disabled = false;
@@ -1270,7 +1422,7 @@ function personFormView() {
 
   return h("div", { class: "panel", id: "personFormPanel" },
     h("h2", {}, editing ? `Editing ${editing.name}` : "Add yourself (or your kids!)"),
-    h("form", { id: "personForm", onsubmit: onSubmit, style: "display:flex;flex-direction:column;gap:12px" },
+    h("form", { id: "personForm", onsubmit: onSubmit, oninput: markDirty, style: "display:flex;flex-direction:column;gap:12px" },
       h("div", { class: "row" },
         h("label", { class: "field", style: "flex:1;min-width:180px" }, "Name", nameInput),
         h("label", { class: "field", style: "flex:1;min-width:180px" },
@@ -1296,7 +1448,7 @@ function personFormView() {
       ),
       h("div", { class: "row" },
         saveBtn,
-        editing && h("button", { type: "button", class: "btn secondary", onclick: () => { state.editingId = null; render(); } }, "Cancel"),
+        editing && h("button", { type: "button", class: "btn secondary", onclick: () => { state.editingId = null; render(true); } }, "Cancel"),
       ),
     ),
   );
@@ -1327,7 +1479,7 @@ function peopleView() {
       canEdit() && h("div", { class: "actions" },
         h("button", {
           class: "btn secondary small",
-          onclick: () => { state.editingId = p.id; render(); document.getElementById("personFormPanel").scrollIntoView({ behavior: "smooth" }); },
+          onclick: () => { state.editingId = p.id; render(true); document.getElementById("personFormPanel").scrollIntoView({ behavior: "smooth" }); },
         }, "✏️ Edit"),
         h("button", { class: "btn secondary small", onclick: () => removePerson(p) }, "🗑 Remove"),
       ),
