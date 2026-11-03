@@ -334,7 +334,7 @@ async function copyText(text, msg) {
 if (firebaseConfig.apiKey.startsWith("YOUR_")) {
   app.replaceChildren(h("div", { class: "panel" },
     h("h2", {}, "Almost there!"),
-    h("p", {}, "Firebase isn't connected yet. Follow gifts/SETUP.md, then paste your project's config into gifts/firebase-config.js."),
+    h("p", {}, "Firebase isn't connected yet. Follow SETUP.md, then paste your project's config into firebase-config.js."),
   ));
   throw new Error("Firebase config missing");
 }

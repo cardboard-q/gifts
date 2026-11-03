@@ -31,6 +31,7 @@ devices apart.
    **Start in production mode** → **Create**.
 3. Open the **Rules** tab. Delete what's there, paste the contents of
    [`firestore.rules`](firestore.rules), and click **Publish**.
+   Or, with the Firebase CLI: `npx firebase-tools deploy --only firestore:rules`.
 
 ## 4. Connect the page
 
@@ -53,16 +54,16 @@ devices apart.
 ## 6. Try it locally
 
 ```sh
-cd /path/to/spinspinner
+cd /path/to/gifts
 python3 -m http.server 8000
 ```
 
-Open <http://localhost:8000/gifts/> (opening the file directly won't work, because
+Open <http://localhost:8000/> (opening the file directly won't work, because
 the page loads `firebase-config.js` as a module).
 
 ## 7. Publish and use it
 
-1. Commit and push. The page will be at <https://cardboard-q.github.io/spinspinner/gifts/>.
+1. Commit and push. The page will be at <https://cardboard-q.github.io/gifts/>.
 2. Create an exchange (it suggests a password; change it if you like).
 3. Click **🔑 Copy my organizer link** and save it somewhere safe.
 4. Click **✉️ Copy invite message** and paste it into an email or text to the family.
