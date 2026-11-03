@@ -57,6 +57,10 @@ service cloud.firestore {
       return a == null || (a is map && a.size() <= 200);
     }
 
+    function validShowMatches(d) {
+      return !('showMatches' in d) || d.showMatches is bool;
+    }
+
     function validFixed(d) {
       return !('fixed' in d) || (d.fixed is map && d.fixed.size() <= 200);
     }
@@ -89,9 +93,10 @@ service cloud.firestore {
       // Created in one batch with both secrets and the creator's organizer and member docs.
       allow create: if signedIn()
         && gid.size() >= 16
-        && request.resource.data.keys().hasOnly(['name', 'avoidSameHousehold', 'assignments', 'fixed', 'drawnAt', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['name', 'avoidSameHousehold', 'showMatches', 'assignments', 'fixed', 'drawnAt', 'createdAt'])
         && validName(request.resource.data.name, 60)
         && request.resource.data.avoidSameHousehold is bool
+        && validShowMatches(request.resource.data)
         && request.resource.data.assignments == null
         && request.resource.data.drawnAt == null
         && request.resource.data.createdAt == request.time
@@ -101,11 +106,12 @@ service cloud.firestore {
 
       allow update: if isOrganizer(gid)
         && request.resource.data.diff(resource.data).affectedKeys()
-             .hasOnly(['name', 'avoidSameHousehold', 'assignments', 'fixed', 'drawnAt'])
+             .hasOnly(['name', 'avoidSameHousehold', 'showMatches', 'assignments', 'fixed', 'drawnAt'])
         && validName(request.resource.data.name, 60)
         && request.resource.data.avoidSameHousehold is bool
         && validAssignments(request.resource.data.assignments)
-        && validFixed(request.resource.data);
+        && validFixed(request.resource.data)
+        && validShowMatches(request.resource.data);
 
       allow delete: if false;
 
