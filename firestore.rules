@@ -138,7 +138,7 @@ service cloud.firestore {
       match /people/{pid} {
         allow read: if isMember(gid);
 
-        allow create: if isMember(gid)
+        allow create: if isOrganizer(gid)
           && validPerson(request.resource.data)
           && request.resource.data.createdAt == request.time;
 
@@ -146,7 +146,7 @@ service cloud.firestore {
           && validPerson(request.resource.data)
           && request.resource.data.createdAt == resource.data.createdAt;
 
-        allow delete: if isMember(gid);
+        allow delete: if isOrganizer(gid);
       }
     }
   }

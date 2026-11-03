@@ -1115,7 +1115,6 @@ function render(resetForm = false) {
 
   const sections = [];
   if (state.isOrganizer) sections.push(organizerView());
-  else sections.push(shareView());
   if (drawReady()) sections.push(peekView());
   if (drawReady() && matchesPublic()) sections.push(pairsView());
   if (state.people.length) sections.push(elfView());
@@ -1123,11 +1122,11 @@ function render(resetForm = false) {
   if (typing) {
     for (const el of [...app.children]) if (el.id !== "personFormPanel") el.remove();
     const formPanel = document.getElementById("personFormPanel");
-    app.prepend(...sections);
-    formPanel.after(peopleView());
+    formPanel.before(...sections, peopleView());
     return;
   }
-  app.replaceChildren(...sections, personFormView(), peopleView());
+  const showForm = state.isOrganizer || state.people.some(p => p.id === state.editingId);
+  app.replaceChildren(...sections, peopleView(), showForm ? personFormView() : "");
 }
 
 function renderLocked() {
@@ -1192,23 +1191,11 @@ function renderLanding() {
   );
 }
 
-function shareView() {
-  const link = shareLink();
-  return h("div", { class: "panel" },
-    h("h2", {}, "Invite family"),
-    h("p", { class: "hint" }, "Send this link. They'll also need the family password."),
-    h("div", { class: "share" },
-      h("code", {}, link),
-      h("button", { class: "btn secondary", onclick: () => copyText(link, "Link copied!") }, "📋 Copy link"),
-    ),
-  );
-}
-
 function inviteMessage(password) {
   return `You're invited to our gift exchange: ${state.group.name}! 🎁\n\n` +
     `1. Open ${shareLink()}\n` +
     `2. Enter the family password: ${password}\n` +
-    `3. Add yourself (and your kids) with a wishlist.\n\n` +
+    `3. Find your name and add your wishlist.\n\n` +
     `Everyone in the family can see and edit the wishlists.`;
 }
 
@@ -1267,7 +1254,7 @@ function organizerView() {
         drawn ? "🎲 Draw names again" : "🎲 Draw names"),
       drawn && h("button", { class: "btn secondary", onclick: clearDraw }, "Clear draw"),
     ),
-    h("p", { class: "hint" }, `${state.people.length} ${state.people.length === 1 ? "person has" : "people have"} joined.`),
+    h("p", { class: "hint" }, `${state.people.length} ${state.people.length === 1 ? "person is" : "people are"} in the exchange.`),
     h("div", { class: "row" },
       h("button", {
         class: "btn secondary small",
@@ -1388,7 +1375,7 @@ function personFormView() {
     saveBtn.disabled = true;
     try {
       await savePerson(editing?.id, { name, household: famInput.value.trim(), items, photo });
-      toast(editing ? "Saved!" : `${name} has joined! 🎁`);
+      toast(editing ? "Saved!" : `${name} is in the exchange! 🎁`);
       state.editingId = null;
       document.activeElement?.blur();
       render(true);
@@ -1399,7 +1386,7 @@ function personFormView() {
   }
 
   return h("div", { class: "panel", id: "personFormPanel" },
-    h("h2", {}, editing ? `Editing ${editing.name}` : "Add yourself (or your kids!)"),
+    h("h2", {}, editing ? `Editing ${editing.name}` : "Add to the exchange"),
     h("form", { id: "personForm", onsubmit: onSubmit, oninput: markDirty, style: "display:flex;flex-direction:column;gap:12px" },
       h("div", { class: "row" },
         h("label", { class: "field", style: "flex:1;min-width:180px" }, "Name", nameInput),
@@ -1434,7 +1421,8 @@ function personFormView() {
 
 function peopleView() {
   if (!state.people.length) {
-    return h("div", { class: "panel" }, h("p", { class: "empty" }, "Nobody has joined yet. Be the first!"));
+    return h("div", { class: "panel" }, h("p", { class: "empty" },
+      state.isOrganizer ? "Nobody's in the exchange yet. Add everyone below." : "The organizer hasn't added anyone yet. Check back soon!"));
   }
   const byId = Object.fromEntries(state.people.map(p => [p.id, p]));
   const a = drawReady() && matchesPublic() && state.group.assignments;
@@ -1459,7 +1447,7 @@ function peopleView() {
           class: "btn secondary small",
           onclick: () => { state.editingId = p.id; render(true); document.getElementById("personFormPanel").scrollIntoView({ behavior: "smooth" }); },
         }, "✏️ Edit"),
-        h("button", { class: "btn secondary small", onclick: () => removePerson(p) }, "🗑 Remove"),
+        state.isOrganizer && h("button", { class: "btn secondary small", onclick: () => removePerson(p) }, "🗑 Remove"),
       ),
     );
   }));

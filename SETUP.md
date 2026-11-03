@@ -66,5 +66,6 @@ the page loads `firebase-config.js` as a module).
 1. Commit and push. The page will be at <https://cardboard-q.github.io/gifts/>.
 2. Create an exchange (it suggests a password; change it if you like).
 3. Click **🔑 Copy my organizer link** and save it somewhere safe.
-4. Click **✉️ Copy invite message** and paste it into an email or text to the family.
-5. Once everyone has joined, click **Draw names**.
+4. Add everyone to the exchange. Only the organizer can add people.
+5. Click **✉️ Copy invite message** and paste it into an email or text to the family.
+6. Click **Draw names**.
