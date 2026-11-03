@@ -2,10 +2,10 @@
 // These are not secrets: Firebase web config is public by design. Access is
 // controlled by the Firestore security rules in firestore.rules.
 export const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_PROJECT.firebaseapp.com",
-  projectId: "YOUR_PROJECT",
-  storageBucket: "YOUR_PROJECT.appspot.com",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId: "YOUR_APP_ID",
+  apiKey: "AIzaSyDS5kBNBfu9DNPQPcGIh1uVpTDb2mv0O9o",
+  authDomain: "giftexchange-2b4ca.firebaseapp.com",
+  projectId: "giftexchange-2b4ca",
+  storageBucket: "giftexchange-2b4ca.firebasestorage.app",
+  messagingSenderId: "976007277527",
+  appId: "1:976007277527:web:cb7de880b33bab5b503992",
 };
